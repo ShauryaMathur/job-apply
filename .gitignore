@@ -1,0 +1,79 @@
+# Generated files
+generated/
+*.pdf
+
+# Environment — never commit any .env variant
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.installed.packages
+venv/
+env/
+.venv/
+
+# ChromaDB
+.chroma/
+chroma_data/
+
+# Node
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Docker
+.dockerignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Playwright
+playwright-report/
+test-results/
+
+# Jobright session (contains auth cookies — never commit)
+jobright-profile/
+
+# Credentials & secrets
+*.json
+!package.json
+!tsconfig.json
+credentials/
+service_account*.json
+*.pem
+*.key
+
+# Resumes (personal data)
+resumes/
+
+# Build artifacts
+*.gz
+*.aux
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+.env.example

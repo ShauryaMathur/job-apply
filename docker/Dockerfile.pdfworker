@@ -1,0 +1,165 @@
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# Install texlive + fonts + Python
+RUN apt-get update && apt-get install -y \
+    texlive-full \
+    fonts-texgyre \
+    fontconfig \
+    python3 \
+    python3-pip \
+    python3-venv \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Register TeX Gyre fonts (and all texlive OTF/TTF fonts) with fontconfig
+# so that xelatex/fontspec can resolve them by name (e.g. "TeX Gyre Termes")
+RUN fc-cache -fv
+
+# Install Python deps
+RUN pip3 install --no-cache-dir \
+    fastapi==0.115.0 \
+    uvicorn[standard]==0.30.6 \
+    python-multipart==0.0.12
+
+WORKDIR /app
+
+# Write the PDF worker FastAPI app inline
+RUN cat > /app/main.py << 'PYEOF'
+"""
+PDF Worker Service
+
+A simple FastAPI service that accepts LaTeX content and compiles it to PDF
+using pdflatex, returning the PDF bytes.
+
+POST /compile
+  Body: {"tex_content": str, "filename": str}
+  Response: PDF bytes (application/pdf)
+
+POST /compile/base64
+  Body: {"tex_content": str, "filename": str}
+  Response: {"pdf_base64": str, "filename": str, "size": int}
+"""
+
+import base64
+import os
+import subprocess
+import tempfile
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
+from pydantic import BaseModel
+
+app = FastAPI(
+    title="PDF Worker",
+    description="LaTeX to PDF compiler service using xelatex",
+    version="1.0.0",
+)
+
+
+class CompileRequest(BaseModel):
+    tex_content: str
+    filename: str = "document"
+
+
+class CompileResponse(BaseModel):
+    pdf_base64: str
+    filename: str
+    size: int
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "pdfworker"}
+
+
+@app.post("/compile")
+async def compile_pdf(request: CompileRequest) -> Response:
+    """
+    Compile LaTeX content to PDF and return raw PDF bytes.
+    """
+    pdf_bytes = _compile(request.tex_content, request.filename)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{request.filename}.pdf"',
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
+@app.post("/compile/base64", response_model=CompileResponse)
+async def compile_pdf_base64(request: CompileRequest) -> CompileResponse:
+    """
+    Compile LaTeX content to PDF and return as base64-encoded JSON.
+    """
+    pdf_bytes = _compile(request.tex_content, request.filename)
+    return CompileResponse(
+        pdf_base64=base64.b64encode(pdf_bytes).decode("utf-8"),
+        filename=f"{request.filename}.pdf",
+        size=len(pdf_bytes),
+    )
+
+
+def _compile(tex_content: str, filename: str) -> bytes:
+    """Compile LaTeX to PDF using xelatex in a temporary directory."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tex_path = Path(tmpdir) / f"{filename}.tex"
+        pdf_path = Path(tmpdir) / f"{filename}.pdf"
+
+        # Write .tex file
+        tex_path.write_text(tex_content, encoding="utf-8")
+
+        # Run xelatex twice (needed for references, TOC, etc.)
+        # xelatex is required for fontspec / \setmainfont support
+        for run in range(2):
+            result = subprocess.run(
+                [
+                    "xelatex",
+                    "-interaction=nonstopmode",
+                    "-halt-on-error",
+                    "-output-directory", tmpdir,
+                    str(tex_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                cwd=tmpdir,
+            )
+
+            if result.returncode != 0:
+                # Extract meaningful error context from xelatex output
+                log_lines = result.stdout.split("\n")
+                error_lines = []
+                for i, l in enumerate(log_lines):
+                    if l.startswith("!") or "Error" in l or "error" in l.lower():
+                        # Include the error line plus the next 2 lines for context
+                        error_lines.extend(log_lines[i:i+3])
+                error_msg = "\n".join(error_lines[:20]) if error_lines else result.stdout[-2000:]
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"xelatex compilation failed (run {run+1}):\n{error_msg}",
+                )
+
+        if not pdf_path.exists():
+            raise HTTPException(
+                status_code=500,
+                detail="pdflatex ran successfully but PDF was not produced",
+            )
+
+        return pdf_path.read_bytes()
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)
+PYEOF
+
+EXPOSE 8001
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "2"]

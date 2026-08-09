@@ -1,0 +1,354 @@
+"""
+Jobs router - CRUD endpoints for job listings.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import List, Optional
+from uuid import UUID
+
+import structlog
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.database import get_db
+from backend.models import Job
+from backend.schemas import JobListResponse, JobOut, JobUpdate, StatsResponse
+from backend.storage import get_storage
+
+router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+logger = structlog.get_logger("jobs_router")
+
+
+@router.get("", response_model=JobListResponse)
+async def list_jobs(
+    category: Optional[str] = Query(None, description="Filter by role_category"),
+    status: Optional[str] = Query(None, description="Filter by status"),
+    h1b_likely: Optional[bool] = Query(None, description="Filter by H1B likelihood"),
+    min_score: Optional[float] = Query(None, description="Minimum match score"),
+    search: Optional[str] = Query(None, description="Search in title or company"),
+    has_latex: Optional[bool] = Query(None, description="Filter to jobs with generated LaTeX"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all jobs with optional filters."""
+    stmt = select(Job)
+
+    if category:
+        stmt = stmt.where(Job.role_category == category)
+    if status:
+        stmt = stmt.where(Job.status == status)
+    if h1b_likely is not None:
+        stmt = stmt.where(Job.h1b_likely == h1b_likely)
+    if min_score is not None:
+        stmt = stmt.where(Job.match_score >= min_score)
+    if search:
+        like = f"%{search}%"
+        stmt = stmt.where(
+            Job.title.ilike(like) | Job.company.ilike(like)
+        )
+    stmt = stmt.where(Job.deleted_at.is_(None))
+    if has_latex:
+        stmt = stmt.where(Job.latex_content.isnot(None))
+
+    # Count total
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar_one()
+
+    # Paginate and order
+    stmt = (
+        stmt
+        .order_by(Job.match_score.desc().nullslast(), Job.scraped_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await db.execute(stmt)
+    jobs = result.scalars().all()
+
+    return JobListResponse(total=total, jobs=[JobOut.model_validate(j) for j in jobs])
+
+
+@router.get("/stats", response_model=StatsResponse)
+async def get_stats(db: AsyncSession = Depends(get_db)):
+    """Get aggregate statistics for the dashboard."""
+    # Total jobs
+    total = (await db.execute(select(func.count(Job.id)).where(Job.deleted_at.is_(None)))).scalar_one()
+
+    # By category
+    cat_result = await db.execute(
+        select(Job.role_category, func.count(Job.id)).where(Job.deleted_at.is_(None)).group_by(Job.role_category)
+    )
+    by_category = {row[0]: row[1] for row in cat_result}
+
+    # By status
+    status_result = await db.execute(
+        select(Job.status, func.count(Job.id)).where(Job.deleted_at.is_(None)).group_by(Job.status)
+    )
+    by_status = {row[0]: row[1] for row in status_result}
+
+    # H1B likely
+    h1b_count = (
+        await db.execute(select(func.count(Job.id)).where(Job.deleted_at.is_(None)).where(Job.h1b_likely == True))
+    ).scalar_one()
+
+    # Resumes generated
+    resumes = (
+        await db.execute(select(func.count(Job.id)).where(Job.deleted_at.is_(None)).where(Job.resume_file.isnot(None)))
+    ).scalar_one()
+
+    applied = by_status.get("applied", 0)
+    interviews = by_status.get("interview", 0)
+
+    return StatsResponse(
+        total_jobs=total,
+        by_category=by_category,
+        by_status=by_status,
+        h1b_likely_count=h1b_count,
+        resumes_generated=resumes,
+        applied_count=applied,
+        interview_count=interviews,
+    )
+
+
+@router.get("/{job_id}", response_model=JobOut)
+async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
+    """Get a single job by its Indeed job_id."""
+    result = await db.execute(select(Job).where(Job.job_id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    return JobOut.model_validate(job)
+
+
+@router.patch("/{job_id}", response_model=JobOut)
+async def update_job(
+    job_id: str,
+    payload: JobUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update job status, notes, or other fields."""
+    result = await db.execute(select(Job).where(Job.job_id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    for field, value in update_data.items():
+        setattr(job, field, value)
+
+    await db.flush()
+    await db.refresh(job)
+
+    logger.info("job_updated", job_id=job_id, fields=list(update_data.keys()))
+    return JobOut.model_validate(job)
+
+
+@router.get("/{job_id}/resume")
+async def download_resume(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Download the tailored resume PDF for a job.
+    Tries local file first, falls back to S3.
+    """
+    result = await db.execute(select(Job).where(Job.job_id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    # Try local file
+    if job.resume_file:
+        local_path = Path(job.resume_file)
+        if local_path.exists():
+            download_name = local_path.name  # e.g. "Shaurya Mathur - Software Engineer.pdf"
+            if local_path.suffix.lower() == ".pdf":
+                return FileResponse(
+                    path=str(local_path),
+                    media_type="application/pdf",
+                    filename=download_name,
+                )
+            # PDF compilation failed — serve the raw .tex so it's still accessible
+            return FileResponse(
+                path=str(local_path),
+                media_type="text/plain",
+                filename=download_name,
+                headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+            )
+
+    # Try S3 pre-signed URL redirect
+    if job.s3_resume_url:
+        from fastapi.responses import RedirectResponse
+        storage = get_storage()
+        # Extract the S3 key from the stored URL: https://{bucket}.s3.{region}.amazonaws.com/{key}
+        s3_key = job.s3_resume_url.split(".amazonaws.com/", 1)[-1]
+        presigned = await storage.generate_presigned_url(s3_key)
+        if presigned:
+            return RedirectResponse(url=presigned)
+        return RedirectResponse(url=job.s3_resume_url)
+
+    raise HTTPException(
+        status_code=404,
+        detail="Resume not yet generated for this job",
+    )
+
+
+@router.get("/{job_id}/cover-letter")
+async def download_cover_letter(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Download the cover letter for a job."""
+    result = await db.execute(select(Job).where(Job.job_id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    if job.cover_letter_file:
+        local_path = Path(job.cover_letter_file)
+        if local_path.exists():
+            suffix = local_path.suffix.lower()
+            media_type = "text/plain" if suffix == ".txt" else "application/pdf"
+            download_name = local_path.name
+            return FileResponse(
+                path=str(local_path),
+                media_type=media_type,
+                filename=download_name,
+                headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+            )
+
+    if job.s3_cover_letter_url:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=job.s3_cover_letter_url)
+
+    raise HTTPException(
+        status_code=404,
+        detail="Cover letter not yet generated for this job",
+    )
+
+
+@router.get("/{job_id}/email")
+async def download_email(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Download the outreach email for a job."""
+    result = await db.execute(select(Job).where(Job.job_id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    if job.email_file:
+        local_path = Path(job.email_file)
+        if local_path.exists():
+            download_name = local_path.name
+            return FileResponse(
+                path=str(local_path),
+                media_type="text/plain",
+                filename=download_name,
+                headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+            )
+
+    raise HTTPException(
+        status_code=404,
+        detail="Outreach email not yet generated for this job",
+    )
+
+
+@router.post("/{job_id}/generate/resume", response_model=JobOut)
+async def generate_resume(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Tailor and generate only the resume PDF for a specific job."""
+    result = await db.execute(select(Job).where(Job.job_id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    from backend.config import get_full_config
+    from agents.resume_tailor import ResumeTailorAgent
+
+    config = get_full_config()
+    job_dict = {
+        "job_id": job.job_id,
+        "title": job.title,
+        "company": job.company,
+        "description": job.description,
+        "role_category": job.role_category,
+        "match_score": job.match_score,
+    }
+
+    try:
+        job_dict = await ResumeTailorAgent(config).tailor_resume(job_dict)
+    except Exception as e:
+        logger.error("resume_tailor_failed", job_id=job_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Resume generation failed: {e}")
+
+    for field in ("resume_file", "s3_resume_url", "latex_content"):
+        setattr(job, field, job_dict.get(field))
+    await db.flush()
+    await db.refresh(job)
+
+    return JobOut.model_validate(job)
+
+
+@router.delete("/{job_id}", status_code=204)
+async def delete_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft-delete a job by setting deleted_at."""
+    from datetime import datetime, timezone
+    result = await db.execute(select(Job).where(Job.job_id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    job.deleted_at = datetime.now(timezone.utc)
+    await db.flush()
+    logger.info("job_soft_deleted", job_id=job_id)
+
+
+@router.post("/{job_id}/generate/cover-letter", response_model=JobOut)
+async def generate_cover_letter_doc(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate cover letter and outreach email for a specific job."""
+    result = await db.execute(select(Job).where(Job.job_id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    from backend.config import get_full_config
+    from agents.cover_letter import CoverLetterAgent
+
+    config = get_full_config()
+    job_dict = {
+        "job_id": job.job_id,
+        "title": job.title,
+        "company": job.company,
+        "description": job.description,
+        "role_category": job.role_category,
+        "match_score": job.match_score,
+    }
+
+    try:
+        job_dict = await CoverLetterAgent(config).generate_cover_letter(job_dict)
+    except Exception as e:
+        logger.error("cover_letter_failed", job_id=job_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Cover letter generation failed: {e}")
+
+    for field in ("cover_letter_file", "email_file", "s3_cover_letter_url"):
+        setattr(job, field, job_dict.get(field))
+    await db.flush()
+    await db.refresh(job)
+
+    return JobOut.model_validate(job)

@@ -1,0 +1,48 @@
+llm:
+  # Each model specifies its own provider prefix — no global provider needed.
+  # Supported prefixes:
+  #   openrouter/<model>  -> via OpenRouter (needs OPENROUTER_API_KEY)
+  #   gemini/<model>      -> Gemini API direct (needs GEMINI_API_KEY)
+  #   ollama/<model>      -> local Ollama (needs OLLAMA_BASE_URL)
+  models:
+    resume_tailor: openrouter/anthropic/claude-sonnet-4-5   # best instruction-following for LaTeX edits
+    ranker: openrouter/openai/gpt-4o-mini                   # reliable JSON + strong tech skill taxonomy
+    orchestrator: openrouter/openai/gpt-4o-mini              # fallback model for unspecified tasks
+    cover_letter: openrouter/openai/gpt-4o-mini              # generative writing
+    classifier: openrouter/openai/gpt-4o-mini               # H1B inference + simple classification
+
+search:
+  job_categories:
+    - name: backend
+      keywords:
+        - "Software Engineer Java"
+        - "Backend Engineer"
+        - "Java Developer"
+        - "Spring Boot Engineer"
+      count: 10
+    - name: fullstack
+      keywords:
+        - "Full Stack Engineer"
+        - "Full Stack Developer"
+      count: 10
+    - name: aiml
+      keywords:
+        - "Machine Learning Engineer"
+        - "AI Engineer"
+        - "ML Engineer"
+      count: 10
+  source: jobright   # jobright | indeed
+  location: "United States"
+  hours_old: 24   # jobright: used as a display hint only (use your saved filters on the site)
+  experience_years: 5
+
+storage:
+  s3_bucket: ""  # fill in .env
+  generated_dir: "./generated"
+
+sheets:
+  spreadsheet_id: ""  # fill in .env
+  worksheet_name: "Applications"
+
+pdf_worker:
+  service_url: "http://pdfworker:8001"
