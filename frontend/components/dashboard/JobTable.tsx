@@ -13,7 +13,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ExternalLink,
-  FileText,
+  PenLine,
   Mail,
   ChevronUp,
   ChevronDown,
@@ -310,7 +310,7 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
                   Status
                 </th>
                 <th className="text-left px-4 py-2 font-medium text-muted-foreground whitespace-nowrap">
-                  Docs
+                  Resume / Docs
                 </th>
                 <th className="text-left px-4 py-2 font-medium text-muted-foreground whitespace-nowrap">
                   Link
@@ -430,11 +430,15 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
                   {/* Per-document generate / download */}
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="flex items-center gap-1">
-                      {/* Resume */}
-                      {(job.resume_file || job.s3_resume_url) ? (
-                        <a href={resumeDownloadUrl(job.job_id)} target="_blank" rel="noopener noreferrer">
-                          <Button variant="ghost" size="icon" className="h-7 w-7" title="Download Resume">
-                            <FileText className="h-3.5 w-3.5 text-blue-600" />
+                      {/* Resume — open editor if latex exists, else generate */}
+                      {generatingResume[job.job_id] ? (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" disabled title="Generating…">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />
+                        </Button>
+                      ) : job.latex_content ? (
+                        <a href={`/editor/${job.job_id}`}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" title="Open LaTeX Editor">
+                            <PenLine className="h-3.5 w-3.5 text-blue-600" />
                           </Button>
                         </a>
                       ) : (
@@ -443,12 +447,9 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
                           size="icon"
                           className="h-7 w-7"
                           onClick={() => handleGenerateResume(job.job_id)}
-                          disabled={generatingResume[job.job_id]}
-                          title="Generate Resume"
+                          title="Generate Resume LaTeX"
                         >
-                          {generatingResume[job.job_id]
-                            ? <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />
-                            : <Sparkles className="h-3.5 w-3.5 text-blue-300" />}
+                          <Sparkles className="h-3.5 w-3.5 text-blue-300" />
                         </Button>
                       )}
 

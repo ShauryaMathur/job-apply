@@ -25,9 +25,9 @@ export default function RootLayout({
               <div className="flex items-center gap-2 mr-6">
                 <span className="text-xl">&#127919;</span>
                 <span className="font-bold text-lg">Job Apply</span>
-                <span className="text-xs text-muted-foreground hidden sm:inline ml-1">
+                {/* <span className="text-xs text-muted-foreground hidden sm:inline ml-1">
                   Multi-Agent
-                </span>
+                </span> */}
               </div>
               <nav className="flex items-center gap-6 text-sm">
                 <a
@@ -35,6 +35,12 @@ export default function RootLayout({
                   className="font-medium text-foreground transition-colors hover:text-primary"
                 >
                   Dashboard
+                </a>
+                <a
+                  href="/pipeline"
+                  className="font-medium text-muted-foreground transition-colors hover:text-primary"
+                >
+                  Pipeline
                 </a>
                 <a
                   href="/apply"

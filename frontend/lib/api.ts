@@ -178,6 +178,7 @@ export interface JobInfo {
 }
 
 export interface IngestUrlResponse {
+  job_id: string;
   job_info: JobInfo;
   latex: string;
   pdf_base64: string | null;
@@ -269,6 +270,12 @@ export async function saveLatex(jobId: string, latexContent: string): Promise<Jo
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `Save failed: ${res.status}`);
   }
+  return res.json();
+}
+
+export async function fetchJob(jobId: string): Promise<Job> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Failed to fetch job: ${res.statusText}`);
   return res.json();
 }
 

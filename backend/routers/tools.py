@@ -10,13 +10,17 @@ import base64
 import os
 from typing import Optional
 
+import uuid
+
 import httpx
 import structlog
 from bs4 import BeautifulSoup
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import get_full_config
+from backend.database import get_db
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/tools", tags=["tools"])
@@ -223,6 +227,7 @@ class JobInfoOut(BaseModel):
 
 
 class IngestUrlResponse(BaseModel):
+    job_id: str
     job_info: JobInfoOut
     latex: str
     pdf_base64: Optional[str] = None
@@ -241,7 +246,7 @@ class CompileLatexResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/ingest-url", response_model=IngestUrlResponse)
-async def ingest_url(request: IngestUrlRequest):
+async def ingest_url(request: IngestUrlRequest, db: AsyncSession = Depends(get_db)):
     """
     Scrape any job URL → extract structured info via LLM →
     tailor resume LaTeX → compile to PDF.
@@ -282,7 +287,26 @@ async def ingest_url(request: IngestUrlRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Resume tailoring failed: {e}")
 
-    # 4. Compile PDF (non-fatal — return latex even if compile fails)
+    # 4. Persist job to DB so it shows up in the left pane and can be auto-saved
+    from backend.models import Job
+    job_id = f"manual-{uuid.uuid4().hex[:12]}"
+    db_job = Job(
+        job_id=job_id,
+        title=job_info.title,
+        company=job_info.company,
+        link=request.url,
+        description=job_info.description[:4000],
+        role_category=request.role_category,
+        source="manual",
+        status="new",
+        h1b_likely=job_info.h1b_likely,
+        latex_content=latex,
+    )
+    db.add(db_job)
+    await db.flush()
+    logger.info("manual_job_persisted", job_id=job_id, title=job_info.title)
+
+    # 5. Compile PDF (non-fatal — return latex even if compile fails)
     pdf_base64 = None
     compile_error = None
     try:
@@ -294,6 +318,7 @@ async def ingest_url(request: IngestUrlRequest):
         logger.warning("preview_compile_failed", error=compile_error)
 
     return IngestUrlResponse(
+        job_id=job_id,
         job_info=job_info,
         latex=latex,
         pdf_base64=pdf_base64,

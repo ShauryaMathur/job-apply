@@ -301,7 +301,7 @@ class ResumeTailorAgent(BaseAgent):
             job_title=title,
             company=company,
             job_description=description[:4000],
-            use_cache=False,
+            use_cache=True,
         )
         return self._ensure_preamble_fixes(latex)
 

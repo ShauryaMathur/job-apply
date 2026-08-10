@@ -267,7 +267,7 @@ async def generate_resume(
     job_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Tailor and generate only the resume PDF for a specific job."""
+    """Generate tailored LaTeX resume for a job and save to DB. PDF is compiled in the editor."""
     result = await db.execute(select(Job).where(Job.job_id == job_id))
     job = result.scalar_one_or_none()
     if not job:
@@ -277,23 +277,20 @@ async def generate_resume(
     from agents.resume_tailor import ResumeTailorAgent
 
     config = get_full_config()
-    job_dict = {
-        "job_id": job.job_id,
-        "title": job.title,
-        "company": job.company,
-        "description": job.description,
-        "role_category": job.role_category,
-        "match_score": job.match_score,
-    }
 
     try:
-        job_dict = await ResumeTailorAgent(config).tailor_resume(job_dict)
+        tailor = ResumeTailorAgent(config)
+        latex = await tailor.tailor_from_description(
+            title=job.title,
+            company=job.company,
+            description=job.description or "",
+            category=job.role_category,
+        )
     except Exception as e:
         logger.error("resume_tailor_failed", job_id=job_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"Resume generation failed: {e}")
 
-    for field in ("resume_file", "s3_resume_url", "latex_content"):
-        setattr(job, field, job_dict.get(field))
+    job.latex_content = latex
     await db.flush()
     await db.refresh(job)
 
