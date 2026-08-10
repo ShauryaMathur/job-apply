@@ -32,6 +32,8 @@ class JobCreate(JobBase):
 
 
 class JobUpdate(BaseModel):
+    title: Optional[str] = None
+    company: Optional[str] = None
     status: Optional[str] = None
     notes: Optional[str] = None
     match_score: Optional[float] = None

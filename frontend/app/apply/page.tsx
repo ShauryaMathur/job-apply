@@ -31,6 +31,18 @@ export default function ApplyPage() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const isValidUrl = (val: string) => {
+    try {
+      const u = new URL(val.trim());
+      return u.protocol === "http:" || u.protocol === "https:";
+    } catch {
+      return false;
+    }
+  };
+
+  const urlTouched = url.length > 0;
+  const urlValid = isValidUrl(url);
+
   // After successful ingest
   const [successJobId, setSuccessJobId] = useState<string | null>(null);
   const [successJobInfo, setSuccessJobInfo] = useState<JobInfo | null>(null);
@@ -91,9 +103,13 @@ export default function ApplyPage() {
                   placeholder="https://jobs.lever.co/... or any job posting URL"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleIngest()}
+                  onKeyDown={(e) => e.key === "Enter" && urlValid && handleIngest()}
                   disabled={loading}
-                  className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                  className={`w-full pl-9 pr-3 py-2 text-sm rounded-md border bg-background focus:outline-none focus:ring-1 disabled:opacity-60 ${
+                    urlTouched && !urlValid
+                      ? "border-destructive focus:ring-destructive"
+                      : "border-input focus:ring-ring"
+                  }`}
                 />
               </div>
               <Select value={category} onValueChange={setCategory} disabled={loading}>
@@ -108,7 +124,7 @@ export default function ApplyPage() {
               </Select>
               <Button
                 onClick={handleIngest}
-                disabled={loading || !url.trim()}
+                disabled={loading || !urlValid}
                 className="gap-2 shrink-0"
               >
                 {loading ? (
@@ -121,21 +137,22 @@ export default function ApplyPage() {
               </Button>
             </div>
 
-            {loadError && (
-              <div className="mt-2 space-y-2">
-                <p className="flex items-center gap-1.5 text-destructive text-sm">
-                  <AlertCircle className="h-4 w-4 shrink-0" />
-                  {loadError}
-                </p>
-                {!showManualPaste && (
-                  <button
-                    onClick={() => setShowManualPaste(true)}
-                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <ClipboardPaste className="h-3.5 w-3.5" />
-                    Paste job description manually instead
-                  </button>
-                )}
+            {urlTouched && !urlValid && (
+              <p className="mt-1.5 text-xs text-destructive">
+                Enter a valid URL starting with https://
+              </p>
+            )}
+
+            {/* Always-visible toggle for manual description */}
+            {!showManualPaste && (
+              <div className="mt-2">
+                <button
+                  onClick={() => setShowManualPaste(true)}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ClipboardPaste className="h-3.5 w-3.5" />
+                  Add job description manually
+                </button>
               </div>
             )}
 
@@ -150,7 +167,7 @@ export default function ApplyPage() {
                     onClick={() => { setShowManualPaste(false); setManualDescription(""); }}
                     className="text-xs text-muted-foreground hover:text-foreground"
                   >
-                    Cancel
+                    Hide
                   </button>
                 </div>
                 <textarea
@@ -161,9 +178,16 @@ export default function ApplyPage() {
                   className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring resize-none font-mono"
                 />
                 <p className="text-xs text-muted-foreground">
-                  The URL is still used for reference. Description replaces the scrape.
+                  URL is used for reference only. Description overrides scraping.
                 </p>
               </div>
+            )}
+
+            {loadError && (
+              <p className="mt-2 flex items-center gap-1.5 text-destructive text-sm">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                {loadError}
+              </p>
             )}
           </CardContent>
         </Card>

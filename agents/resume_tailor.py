@@ -41,9 +41,10 @@ PAGE LIMIT:
 - Only exceed 1 page if the job requires so many distinct skills that omitting any would critically hurt the match score
 
 CONTENT CHANGES ALLOWED:
+- Update the resume headline role title (the \section{...} immediately after \begin{document}) to match the target role title from the job description exactly (e.g., change "Full Stack Software Engineer" → "Senior Software Engineer" if that is the JD title). This is an ATS keyword-match requirement, not fabrication.
 - Reword bullet points to naturally incorporate keywords and phrases from the job description
 - Reorder bullet points within a role to surface the most relevant ones first
-- Update the summary/objective/profile section to directly mirror the role's language
+- Update the summary/objective/profile section to directly mirror the role's language, seniority level, and key requirements
 - Adjust the skills section: reorder, add closely adjacent technologies, remove irrelevant ones
 
 CONTROLLED FABRICATION (allowed in these specific cases only):
@@ -54,7 +55,7 @@ CONTROLLED FABRICATION (allowed in these specific cases only):
    - Resume has "Prometheus" → JD mentions "Grafana" → add "Grafana"
    - Only do this for technologies you are certain are adjacent — do NOT invent unrelated skills
 
-NEVER fabricate: job titles, companies, employment dates, degrees, certifications, or entirely new projects."""
+NEVER fabricate: work history job titles, companies, employment dates, degrees, certifications, or entirely new projects. (The resume headline is NOT a work history title — updating it to match the JD is required.)"""
 
 TAILOR_USER_TEMPLATE = """MASTER RESUME (LaTeX):
 {resume_tex}
@@ -67,11 +68,12 @@ JOB DESCRIPTION:
 
 Instructions:
 1. Identify the top keywords, required skills, and technologies from the job description
-2. Comment out (%) bullet points least relevant to this role to stay within 1 page
-3. Reword remaining bullets to naturally use the JD's language and keywords
-4. Add plausible approximate metrics (~N%) where achievements lack numbers
-5. Add adjacent technologies where the JD explicitly calls for tools closely related to what's already in the resume
-6. Update the summary to directly reflect this role
+2. Update the resume headline role title (\section{{...}}) to exactly match the JD job title
+3. Comment out (%) bullet points least relevant to this role to stay within 1 page
+4. Reword remaining bullets to naturally use the JD's language and keywords
+5. Add plausible approximate metrics (~N%) where achievements lack numbers
+6. Add adjacent technologies where the JD explicitly calls for tools closely related to what's already in the resume
+7. Update the summary to directly mirror the role's language, seniority, and key requirements
 
 Return the complete tailored LaTeX code only. No explanations."""
 
@@ -86,11 +88,12 @@ JOB DESCRIPTION:
 
 Instructions:
 1. Identify the top keywords, required skills, and technologies from the job description
-2. Comment out (%) bullet points least relevant to this role to stay within 1 page
-3. Reword remaining bullets to naturally use the JD's language and keywords
-4. Add plausible approximate metrics (~N%) where achievements lack numbers
-5. Add adjacent technologies where the JD explicitly calls for tools closely related to what's already in the resume
-6. Update the summary to directly reflect this role
+2. Update the resume headline role title (\section{{...}}) to exactly match the JD job title
+3. Comment out (%) bullet points least relevant to this role to stay within 1 page
+4. Reword remaining bullets to naturally use the JD's language and keywords
+5. Add plausible approximate metrics (~N%) where achievements lack numbers
+6. Add adjacent technologies where the JD explicitly calls for tools closely related to what's already in the resume
+7. Update the summary to directly mirror the role's language, seniority, and key requirements
 
 Return the complete tailored LaTeX code only. No explanations."""
 

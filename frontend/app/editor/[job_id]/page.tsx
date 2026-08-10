@@ -12,7 +12,7 @@ import {
   ArrowLeft,
   Save,
 } from "lucide-react";
-import { fetchJob, compileLatex, saveLatex, type Job } from "@/lib/api";
+import { fetchJob, compileLatex, saveLatex, updateJob, type Job } from "@/lib/api";
 
 function base64ToBlobUrl(b64: string): string {
   const binary = atob(b64);
@@ -51,6 +51,10 @@ export default function EditorPage({ params }: { params: { job_id: string } }) {
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
 
   const [autoSaving, setAutoSaving] = useState(false);
+
+  // Inline editing for title / company in breadcrumb
+  const [editingField, setEditingField] = useState<"title" | "company" | null>(null);
+  const [editValue, setEditValue] = useState("");
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -125,6 +129,29 @@ export default function EditorPage({ params }: { params: { job_id: string } }) {
     [doCompile, job_id]
   );
 
+  const startEditing = (field: "title" | "company") => {
+    if (!job) return;
+    setEditingField(field);
+    setEditValue(job[field]);
+  };
+
+  const commitEdit = useCallback(async () => {
+    if (!editingField || !job || !editValue.trim()) {
+      setEditingField(null);
+      return;
+    }
+    const trimmed = editValue.trim();
+    if (trimmed === job[editingField]) { setEditingField(null); return; }
+    try {
+      const updated = await updateJob(job_id, { [editingField]: trimmed });
+      setJob(updated);
+    } catch (e) {
+      console.error("Failed to update field", e);
+    } finally {
+      setEditingField(null);
+    }
+  }, [editingField, editValue, job, job_id]);
+
   const handleDownload = useCallback(() => {
     if (!pdfBlobUrl || !job) return;
     const a = document.createElement("a");
@@ -183,9 +210,43 @@ export default function EditorPage({ params }: { params: { job_id: string } }) {
           </Button>
         </a>
         <span className="text-muted-foreground text-xs">/</span>
-        <span className="font-semibold text-sm truncate max-w-[180px]" title={job.title}>{job.title}</span>
+        {editingField === "title" ? (
+          <input
+            autoFocus
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={(e) => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditingField(null); }}
+            className="font-semibold text-sm bg-transparent border-b border-primary focus:outline-none w-48"
+          />
+        ) : (
+          <span
+            className="font-semibold text-sm truncate max-w-[180px] cursor-pointer hover:text-primary transition-colors"
+            title="Double-click to edit title"
+            onDoubleClick={() => startEditing("title")}
+          >
+            {job.title}
+          </span>
+        )}
         <span className="text-muted-foreground text-xs">@</span>
-        <span className="text-sm truncate max-w-[140px]" title={job.company}>{job.company}</span>
+        {editingField === "company" ? (
+          <input
+            autoFocus
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={(e) => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditingField(null); }}
+            className="text-sm bg-transparent border-b border-primary focus:outline-none w-36"
+          />
+        ) : (
+          <span
+            className="text-sm truncate max-w-[140px] cursor-pointer hover:text-primary transition-colors"
+            title="Double-click to edit company"
+            onDoubleClick={() => startEditing("company")}
+          >
+            {job.company}
+          </span>
+        )}
         {job.role_category && (
           <Badge variant="secondary" className="text-xs">{CATEGORY_LABELS[job.role_category] || job.role_category}</Badge>
         )}

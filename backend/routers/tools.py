@@ -157,6 +157,12 @@ _EXTRACT_PROMPT = """Extract structured job details from the page text below. Re
 }}
 
 Rules:
+- company: extract the hiring organization's name. Check ALL of these sources in order:
+    1. Explicit "Company:" or "Employer:" labels
+    2. "About [Company Name]" or "About [Company] & ..." sections — use the primary organization name from that heading (e.g. "About Lean In & The Sandberg Bernthal Family Foundation" → "Lean In")
+    3. The domain name or logo text if visible
+    4. Any "Posted by" or "Hiring at" references
+  NEVER return "Not Specified", "N/A", "Unknown", or any placeholder — if truly undetectable use "Unknown Company"
 - h1b_likely: true if sponsorship mentioned/offered, false if explicitly not offered, null if not mentioned
 - key_skills: most important technical skills from the JD only
 - description: keep ALL technical details, strip navigation/cookie/footer text
@@ -262,10 +268,17 @@ async def ingest_url(request: IngestUrlRequest, db: AsyncSession = Depends(get_d
             raise HTTPException(status_code=422, detail="Could not extract content from the job URL")
 
     # 2. Extract structured job info
+    _PLACEHOLDER_VALUES = {"not specified", "n/a", "unknown", "none", "", "not available", "unspecified"}
+
+    def _clean(value: str | None, fallback: str) -> str:
+        if not value or value.strip().lower() in _PLACEHOLDER_VALUES:
+            return fallback
+        return value.strip()
+
     info = await _extract_job_info(page_text)
     job_info = JobInfoOut(
-        title=info.get("title", "Unknown Role"),
-        company=info.get("company", "Unknown Company"),
+        title=_clean(info.get("title"), "Unknown Role"),
+        company=_clean(info.get("company"), "Unknown Company"),
         description=info.get("description") or page_text[:4000],
         h1b_likely=info.get("h1b_likely"),
         seniority=info.get("seniority"),

@@ -98,6 +98,8 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
   const [generatingResume, setGeneratingResume] = useState<Record<string, boolean>>({});
   const [generatingCoverLetter, setGeneratingCoverLetter] = useState<Record<string, boolean>>({});
   const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({});
+  const [editingCell, setEditingCell] = useState<{ jobId: string; field: "title" | "company" } | null>(null);
+  const [editValue, setEditValue] = useState("");
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterH1b, setFilterH1b] = useState<string>("all");
@@ -149,6 +151,26 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
     },
     [onJobUpdated]
   );
+
+  const startCellEdit = (jobId: string, field: "title" | "company", current: string) => {
+    setEditingCell({ jobId, field });
+    setEditValue(current);
+  };
+
+  const commitCellEdit = useCallback(async () => {
+    if (!editingCell || !editValue.trim()) { setEditingCell(null); return; }
+    const trimmed = editValue.trim();
+    const job = jobs.find((j) => j.job_id === editingCell.jobId);
+    if (!job || trimmed === job[editingCell.field]) { setEditingCell(null); return; }
+    try {
+      const updated = await updateJob(editingCell.jobId, { [editingCell.field]: trimmed });
+      onJobUpdated?.(updated);
+    } catch (e) {
+      console.error("Failed to update field", e);
+    } finally {
+      setEditingCell(null);
+    }
+  }, [editingCell, editValue, jobs, onJobUpdated]);
 
   const handleDelete = useCallback(
     async (jobId: string) => {
@@ -348,12 +370,24 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
                 >
                   {/* Title */}
                   <td className="px-4 py-3 max-w-[220px]">
-                    <div
-                      className="font-medium truncate"
-                      title={job.title}
-                    >
-                      {job.title}
-                    </div>
+                    {editingCell?.jobId === job.job_id && editingCell.field === "title" ? (
+                      <input
+                        autoFocus
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onBlur={commitCellEdit}
+                        onKeyDown={(e) => { if (e.key === "Enter") commitCellEdit(); if (e.key === "Escape") setEditingCell(null); }}
+                        className="font-medium text-sm bg-transparent border-b border-primary focus:outline-none w-full"
+                      />
+                    ) : (
+                      <div
+                        className="font-medium truncate cursor-pointer hover:text-primary transition-colors"
+                        title="Double-click to edit title"
+                        onDoubleClick={() => startCellEdit(job.job_id, "title", job.title)}
+                      >
+                        {job.title}
+                      </div>
+                    )}
                     {job.location && (
                       <div className="text-xs text-muted-foreground truncate">
                         {job.location}
@@ -363,9 +397,24 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
 
                   {/* Company */}
                   <td className="px-4 py-3 max-w-[160px]">
-                    <span className="truncate block" title={job.company}>
-                      {job.company}
-                    </span>
+                    {editingCell?.jobId === job.job_id && editingCell.field === "company" ? (
+                      <input
+                        autoFocus
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onBlur={commitCellEdit}
+                        onKeyDown={(e) => { if (e.key === "Enter") commitCellEdit(); if (e.key === "Escape") setEditingCell(null); }}
+                        className="text-sm bg-transparent border-b border-primary focus:outline-none w-full"
+                      />
+                    ) : (
+                      <span
+                        className="truncate block cursor-pointer hover:text-primary transition-colors"
+                        title="Double-click to edit company"
+                        onDoubleClick={() => startCellEdit(job.job_id, "company", job.company)}
+                      >
+                        {job.company}
+                      </span>
+                    )}
                   </td>
 
                   {/* Category */}

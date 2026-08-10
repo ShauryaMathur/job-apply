@@ -115,7 +115,7 @@ export async function fetchStats(): Promise<StatsResponse> {
 
 export async function updateJob(
   jobId: string,
-  data: { status?: string; notes?: string }
+  data: { status?: string; notes?: string; title?: string; company?: string }
 ): Promise<Job> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}`, {
     method: "PATCH",
