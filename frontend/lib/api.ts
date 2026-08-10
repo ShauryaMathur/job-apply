@@ -191,14 +191,16 @@ export interface CompileLatexResponse {
 }
 
 export async function ingestJobUrl(
-  url: string,
+  url: string | undefined,
   roleCategory: string,
-  description?: string
+  description?: string,
+  signal?: AbortSignal,
 ): Promise<IngestUrlResponse> {
   const res = await fetch(`${API_BASE}/tools/ingest-url`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url, role_category: roleCategory, ...(description ? { description } : {}) }),
+    body: JSON.stringify({ ...(url ? { url } : {}), role_category: roleCategory, ...(description ? { description } : {}) }),
+    signal,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -230,9 +232,10 @@ export async function cancelPipeline(runId: string): Promise<void> {
   }
 }
 
-export async function generateResume(jobId: string): Promise<Job> {
+export async function generateResume(jobId: string, signal?: AbortSignal): Promise<Job> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}/generate/resume`, {
     method: "POST",
+    signal,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -241,9 +244,10 @@ export async function generateResume(jobId: string): Promise<Job> {
   return res.json();
 }
 
-export async function generateCoverLetter(jobId: string): Promise<Job> {
+export async function generateCoverLetter(jobId: string, signal?: AbortSignal): Promise<Job> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}/generate/cover-letter`, {
     method: "POST",
+    signal,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

@@ -218,7 +218,7 @@ async def _call_pdfworker(tex_content: str) -> bytes:
 # ── Request / Response models ─────────────────────────────────────────────────
 
 class IngestUrlRequest(BaseModel):
-    url: str
+    url: Optional[str] = None
     role_category: str = "backend"
     description: Optional[str] = None  # manual override — skips scraping when provided
 
@@ -262,10 +262,12 @@ async def ingest_url(request: IngestUrlRequest, db: AsyncSession = Depends(get_d
     if request.description and request.description.strip():
         page_text = request.description.strip()
         logger.info("ingest_url_using_manual_description", chars=len(page_text))
-    else:
+    elif request.url and request.url.strip():
         page_text = await _scrape_url(request.url)
         if not page_text:
             raise HTTPException(status_code=422, detail="Could not extract content from the job URL")
+    else:
+        raise HTTPException(status_code=422, detail="Provide a job URL or paste a job description")
 
     # 2. Extract structured job info
     _PLACEHOLDER_VALUES = {"not specified", "n/a", "unknown", "none", "", "not available", "unspecified"}
@@ -307,7 +309,7 @@ async def ingest_url(request: IngestUrlRequest, db: AsyncSession = Depends(get_d
         job_id=job_id,
         title=job_info.title,
         company=job_info.company,
-        link=request.url,
+        link=request.url or "",
         description=job_info.description[:4000],
         role_category=request.role_category,
         source="manual",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,6 +30,7 @@ export default function ApplyPage() {
 
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const abortController = useRef<AbortController | null>(null);
 
   const isValidUrl = (val: string) => {
     try {
@@ -42,15 +43,19 @@ export default function ApplyPage() {
 
   const urlTouched = url.length > 0;
   const urlValid = isValidUrl(url);
+  // Can submit if: URL is valid, OR no URL but description is provided
+  const canSubmit = urlValid || (!url.trim() && manualDescription.trim().length > 0);
 
   // After successful ingest
   const [successJobId, setSuccessJobId] = useState<string | null>(null);
   const [successJobInfo, setSuccessJobInfo] = useState<JobInfo | null>(null);
 
   const handleIngest = useCallback(async () => {
+    if (!canSubmit) return;
     const trimmed = url.trim();
-    if (!trimmed) return;
 
+    const controller = new AbortController();
+    abortController.current = controller;
     setLoading(true);
     setLoadError(null);
     setSuccessJobId(null);
@@ -58,19 +63,21 @@ export default function ApplyPage() {
 
     try {
       const desc = manualDescription.trim() || undefined;
-      const result = await ingestJobUrl(trimmed, category, desc);
+      const result = await ingestJobUrl(trimmed || undefined, category, desc, controller.signal);
       setSuccessJobId(result.job_id);
       setSuccessJobInfo(result.job_info);
     } catch (e) {
+      if ((e as Error).name === "AbortError") return;
       const msg = e instanceof Error ? e.message : "Failed to analyze job URL";
       setLoadError(msg);
       if (msg.toLowerCase().includes("javascript") || msg.toLowerCase().includes("paste")) {
         setShowManualPaste(true);
       }
     } finally {
+      abortController.current = null;
       setLoading(false);
     }
-  }, [url, category, manualDescription]);
+  }, [url, category, manualDescription, canSubmit]);
 
   const handleReset = () => {
     setUrl("");
@@ -85,7 +92,7 @@ export default function ApplyPage() {
     <div className="flex flex-col gap-6 max-w-2xl mx-auto w-full">
       {/* Page header */}
       <div>
-        <h1 className="text-xl font-bold">Apply Tool</h1>
+        <h1 className="text-xl font-bold">Scout</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
           Paste a job URL to scrape, extract, and generate a tailored LaTeX resume saved to your dashboard.
         </p>
@@ -103,7 +110,7 @@ export default function ApplyPage() {
                   placeholder="https://jobs.lever.co/... or any job posting URL"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && urlValid && handleIngest()}
+                  onKeyDown={(e) => e.key === "Enter" && canSubmit && handleIngest()}
                   disabled={loading}
                   className={`w-full pl-9 pr-3 py-2 text-sm rounded-md border bg-background focus:outline-none focus:ring-1 disabled:opacity-60 ${
                     urlTouched && !urlValid
@@ -124,7 +131,7 @@ export default function ApplyPage() {
               </Select>
               <Button
                 onClick={handleIngest}
-                disabled={loading || !urlValid}
+                disabled={loading || !canSubmit}
                 className="gap-2 shrink-0"
               >
                 {loading ? (
@@ -199,6 +206,12 @@ export default function ApplyPage() {
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
           <p className="text-sm font-medium">Scraping job page and tailoring your resume…</p>
           <p className="text-xs">Scrape → extract → LLM tailor → save. Takes ~45 seconds.</p>
+          <button
+            onClick={() => { abortController.current?.abort(); setLoading(false); }}
+            className="text-xs text-muted-foreground hover:text-destructive mt-1"
+          >
+            cancel
+          </button>
         </div>
       )}
 

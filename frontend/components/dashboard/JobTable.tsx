@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import type { Job } from "@/lib/api";
 import { updateJob, generateResume, generateCoverLetter, deleteJob, resumeDownloadUrl, coverLetterDownloadUrl, emailDownloadUrl } from "@/lib/api";
+import { STATUS_OPTIONS, CATEGORY_LABELS, STATUS_VARIANT, CATEGORY_VARIANT } from "@/lib/constants";
 
 interface JobTableProps {
   jobs: Job[];
@@ -32,41 +33,6 @@ interface JobTableProps {
   onJobUpdated?: (job: Job) => void;
   onJobDeleted?: (jobId: string) => void;
 }
-
-const STATUS_OPTIONS = [
-  "new",
-  "reviewed",
-  "applying",
-  "applied",
-  "rejected",
-  "interview",
-  "offer",
-];
-
-const CATEGORY_LABELS: Record<string, string> = {
-  backend: "Backend",
-  fullstack: "Full Stack",
-  aiml: "AI/ML",
-};
-
-const STATUS_VARIANT: Record<
-  string,
-  "default" | "secondary" | "success" | "warning" | "destructive" | "info" | "purple"
-> = {
-  new: "secondary",
-  reviewed: "info",
-  applying: "info",
-  applied: "success",
-  rejected: "destructive",
-  interview: "warning",
-  offer: "purple",
-};
-
-const CATEGORY_VARIANT: Record<string, "default" | "info" | "success" | "purple"> = {
-  backend: "info",
-  fullstack: "success",
-  aiml: "purple",
-};
 
 function ScoreBar({ score }: { score: number | null }) {
   if (score === null || score === undefined) {
@@ -94,10 +60,13 @@ function ScoreBar({ score }: { score: number | null }) {
 }
 
 export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTableProps) {
-  const [statusUpdating, setStatusUpdating] = useState<Record<string, boolean>>({});
-  const [generatingResume, setGeneratingResume] = useState<Record<string, boolean>>({});
-  const [generatingCoverLetter, setGeneratingCoverLetter] = useState<Record<string, boolean>>({});
-  const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({});
+  // Single loading-state map: jobId → operation name (or undefined when idle)
+  const [rowLoading, setRowLoading] = useState<Record<string, string | undefined>>({});
+  const setOp = (jobId: string, op: string | undefined) =>
+    setRowLoading((prev) => ({ ...prev, [jobId]: op }));
+
+  // AbortController per job for cancellable LLM operations
+  const abortControllers = useRef<Record<string, AbortController>>({});
   const [editingCell, setEditingCell] = useState<{ jobId: string; field: "title" | "company" } | null>(null);
   const [editValue, setEditValue] = useState("");
   const [filterCategory, setFilterCategory] = useState<string>("all");
@@ -109,14 +78,14 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
 
   const handleStatusChange = useCallback(
     async (jobId: string, newStatus: string) => {
-      setStatusUpdating((prev) => ({ ...prev, [jobId]: true }));
+      setOp(jobId, "status");
       try {
         const updated = await updateJob(jobId, { status: newStatus });
         onJobUpdated?.(updated);
       } catch (e) {
         console.error("Failed to update job status", e);
       } finally {
-        setStatusUpdating((prev) => ({ ...prev, [jobId]: false }));
+        setOp(jobId, undefined);
       }
     },
     [onJobUpdated]
@@ -124,14 +93,17 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
 
   const handleGenerateResume = useCallback(
     async (jobId: string) => {
-      setGeneratingResume((prev) => ({ ...prev, [jobId]: true }));
+      const controller = new AbortController();
+      abortControllers.current[jobId] = controller;
+      setOp(jobId, "resume");
       try {
-        const updated = await generateResume(jobId);
+        const updated = await generateResume(jobId, controller.signal);
         onJobUpdated?.(updated);
       } catch (e) {
-        console.error("Failed to generate resume", e);
+        if ((e as Error).name !== "AbortError") console.error("Failed to generate resume", e);
       } finally {
-        setGeneratingResume((prev) => ({ ...prev, [jobId]: false }));
+        delete abortControllers.current[jobId];
+        setOp(jobId, undefined);
       }
     },
     [onJobUpdated]
@@ -139,18 +111,25 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
 
   const handleGenerateCoverLetter = useCallback(
     async (jobId: string) => {
-      setGeneratingCoverLetter((prev) => ({ ...prev, [jobId]: true }));
+      const controller = new AbortController();
+      abortControllers.current[jobId] = controller;
+      setOp(jobId, "coverletter");
       try {
-        const updated = await generateCoverLetter(jobId);
+        const updated = await generateCoverLetter(jobId, controller.signal);
         onJobUpdated?.(updated);
       } catch (e) {
-        console.error("Failed to generate cover letter", e);
+        if ((e as Error).name !== "AbortError") console.error("Failed to generate cover letter", e);
       } finally {
-        setGeneratingCoverLetter((prev) => ({ ...prev, [jobId]: false }));
+        delete abortControllers.current[jobId];
+        setOp(jobId, undefined);
       }
     },
     [onJobUpdated]
   );
+
+  const handleCancelOp = useCallback((jobId: string) => {
+    abortControllers.current[jobId]?.abort();
+  }, []);
 
   const startCellEdit = (jobId: string, field: "title" | "company", current: string) => {
     setEditingCell({ jobId, field });
@@ -174,14 +153,14 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
 
   const handleDelete = useCallback(
     async (jobId: string) => {
-      setDeletingIds((prev) => ({ ...prev, [jobId]: true }));
+      setOp(jobId, "delete");
       try {
         await deleteJob(jobId);
         onJobDeleted?.(jobId);
       } catch (e) {
         console.error("Failed to delete job", e);
       } finally {
-        setDeletingIds((prev) => ({ ...prev, [jobId]: false }));
+        setOp(jobId, undefined);
       }
     },
     [onJobDeleted]
@@ -454,14 +433,14 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
                     <Select
                       value={job.status}
                       onValueChange={(val) => handleStatusChange(job.job_id, val)}
-                      disabled={statusUpdating[job.job_id]}
+                      disabled={rowLoading[job.job_id] === "status"}
                     >
                       <SelectTrigger className="h-7 text-xs w-28 border-0 p-0 focus:ring-0 shadow-none">
                         <Badge
                           variant={STATUS_VARIANT[job.status] || "secondary"}
                           className="text-xs cursor-pointer"
                         >
-                          {statusUpdating[job.job_id]
+                          {rowLoading[job.job_id] === "status"
                             ? "Saving..."
                             : job.status}
                         </Badge>
@@ -480,10 +459,13 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="flex items-center gap-1">
                       {/* Resume — open editor if latex exists, else generate */}
-                      {generatingResume[job.job_id] ? (
-                        <Button variant="ghost" size="icon" className="h-7 w-7" disabled title="Generating…">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />
-                        </Button>
+                      {rowLoading[job.job_id] === "resume" ? (
+                        <div className="flex flex-col items-center">
+                          <Button variant="ghost" size="icon" className="h-7 w-7" disabled>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />
+                          </Button>
+                          <button onClick={() => handleCancelOp(job.job_id)} className="text-[10px] text-muted-foreground hover:text-destructive leading-none">cancel</button>
+                        </div>
                       ) : job.latex_content ? (
                         <a href={`/editor/${job.job_id}`}>
                           <Button variant="ghost" size="icon" className="h-7 w-7" title="Open LaTeX Editor">
@@ -509,18 +491,22 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
                             <Mail className="h-3.5 w-3.5 text-purple-600" />
                           </Button>
                         </a>
+                      ) : rowLoading[job.job_id] === "coverletter" ? (
+                        <div className="flex flex-col items-center">
+                          <Button variant="ghost" size="icon" className="h-7 w-7" disabled>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-400" />
+                          </Button>
+                          <button onClick={() => handleCancelOp(job.job_id)} className="text-[10px] text-muted-foreground hover:text-destructive leading-none">cancel</button>
+                        </div>
                       ) : (
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7"
                           onClick={() => handleGenerateCoverLetter(job.job_id)}
-                          disabled={generatingCoverLetter[job.job_id]}
                           title="Generate Cover Letter & Email"
                         >
-                          {generatingCoverLetter[job.job_id]
-                            ? <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-400" />
-                            : <Sparkles className="h-3.5 w-3.5 text-purple-300" />}
+                          <Sparkles className="h-3.5 w-3.5 text-purple-300" />
                         </Button>
                       )}
 
@@ -550,10 +536,10 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
                         size="icon"
                         className="h-7 w-7 text-muted-foreground hover:text-destructive"
                         onClick={() => handleDelete(job.job_id)}
-                        disabled={deletingIds[job.job_id]}
+                        disabled={rowLoading[job.job_id] === "delete"}
                         title="Delete job"
                       >
-                        {deletingIds[job.job_id]
+                        {rowLoading[job.job_id] === "delete"
                           ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           : <Trash2 className="h-3.5 w-3.5" />}
                       </Button>

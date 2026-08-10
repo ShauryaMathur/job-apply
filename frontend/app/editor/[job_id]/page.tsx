@@ -13,6 +13,7 @@ import {
   Save,
 } from "lucide-react";
 import { fetchJob, compileLatex, saveLatex, updateJob, type Job } from "@/lib/api";
+import { CATEGORY_LABELS } from "@/lib/constants";
 
 function base64ToBlobUrl(b64: string): string {
   const binary = atob(b64);
@@ -21,22 +22,6 @@ function base64ToBlobUrl(b64: string): string {
   const blob = new Blob([bytes], { type: "application/pdf" });
   return URL.createObjectURL(blob);
 }
-
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "success" | "warning" | "destructive" | "info" | "purple"> = {
-  new: "secondary",
-  reviewed: "info",
-  applying: "info",
-  applied: "success",
-  rejected: "destructive",
-  interview: "warning",
-  offer: "purple",
-};
-
-const CATEGORY_LABELS: Record<string, string> = {
-  backend: "Backend",
-  fullstack: "Full Stack",
-  aiml: "AI/ML",
-};
 
 export default function EditorPage({ params }: { params: { job_id: string } }) {
   const { job_id } = params;

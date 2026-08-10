@@ -40,13 +40,13 @@ export default function RootLayout({
                   href="/pipeline"
                   className="font-medium text-muted-foreground transition-colors hover:text-primary"
                 >
-                  Pipeline
+                  Radar
                 </a>
                 <a
                   href="/apply"
                   className="font-medium text-muted-foreground transition-colors hover:text-primary"
                 >
-                  Apply Tool
+                  Scout
                 </a>
               </nav>
               <div className="ml-auto" />

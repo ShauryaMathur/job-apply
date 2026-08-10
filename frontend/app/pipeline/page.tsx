@@ -89,9 +89,9 @@ export default function PipelinePage() {
               <ArrowLeft className="h-3.5 w-3.5" /> Dashboard
             </a>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight">Pipeline</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Radar</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Configure and run the multi-agent job scraping pipeline.
+            Configure and run the multi-agent job scraping radar.
           </p>
         </div>
         <div className="flex items-center gap-2">
