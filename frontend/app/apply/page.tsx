@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { ingestJobUrl, type JobInfo } from "@/lib/api";
 import { extractSourceFromUrl, SOURCE_LABELS } from "@/lib/constants";
+import { notifyTaskDone, requestNotifyPermission } from "@/lib/notify";
 
 export default function ApplyPage() {
   const [url, setUrl] = useState("");
@@ -56,6 +57,10 @@ export default function ApplyPage() {
     if (!canSubmit) return;
     const trimmed = url.trim();
 
+    // Request desktop notification permission from this click (user gesture)
+    // so we can pull focus back once the scrape/tailor run finishes.
+    requestNotifyPermission();
+
     const controller = new AbortController();
     abortController.current = controller;
     setLoading(true);
@@ -68,6 +73,10 @@ export default function ApplyPage() {
       const result = await ingestJobUrl(trimmed || undefined, category, desc, controller.signal, source || undefined);
       setSuccessJobId(result.job_id);
       setSuccessJobInfo(result.job_info);
+      notifyTaskDone(
+        "Scout finished",
+        `${result.job_info.title} at ${result.job_info.company} — resume ready`
+      );
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
       const msg = e instanceof Error ? e.message : "Failed to analyze job URL";
@@ -75,6 +84,7 @@ export default function ApplyPage() {
       if (msg.toLowerCase().includes("javascript") || msg.toLowerCase().includes("paste")) {
         setShowManualPaste(true);
       }
+      notifyTaskDone("Scout failed", msg);
     } finally {
       abortController.current = null;
       setLoading(false);

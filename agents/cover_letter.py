@@ -7,6 +7,7 @@ Generates personalized cover letters as LaTeX PDFs and outreach emails using an 
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -88,11 +89,20 @@ STRICT STYLE RULES:
 - Maximum 1 page (~350 words).
 - Use plain text only. No markdown, no asterisks, no special formatting. No LaTeX commands.
 - Use double newlines between paragraphs.
+- Do NOT lift or lightly reword specific resume bullets. Synthesize a macro-level narrative (years of experience, domains, scope, trajectory) instead of restating line items.
+
+TIMELINE ACCURACY (read the resume dates carefully -- this is the most common failure mode):
+- You are told today's date. Every resume entry (job, degree, project) with an end date before today's date is FINISHED. Never describe it in the present tense and never say "currently developing/building/working on" anything tied to it.
+- Only use present-tense/ongoing framing ("currently") for an entry whose end date is explicitly "Present"/"Current", or is later than today's date.
+- If the candidate's most recent resume entry (job or degree) has already ended, they are between roles / actively job searching right now. State this plainly and confidently as forward-looking intent (e.g. "Having just completed my MS..., I'm now looking to bring..."), not as an ongoing task at a past employer.
+- Never invent an employer, project, or degree status that is not supported by the dates given.
 
 OUTPUT FORMAT:
 Return ONLY the cover letter body text. No date, no address block, no "Dear Hiring Manager" salutation, no sign-off. Just the body paragraphs starting with the hook."""
 
 COVER_LETTER_USER_TEMPLATE = """Write a cover letter body for this application:
+
+TODAY'S DATE: {today_date}
 
 ROLE: {job_title}
 COMPANY: {company}
@@ -100,7 +110,7 @@ COMPANY: {company}
 JOB DESCRIPTION:
 {job_description}
 
-CANDIDATE RESUME (LaTeX -- use the experience, metrics, and skills here):
+CANDIDATE RESUME (LaTeX stripped to text -- includes work history, education, and project dates. Use the experience, metrics, and skills here, but do not quote bullets verbatim):
 {resume_text}
 
 STRUCTURE TO FOLLOW (write in this exact order):
@@ -113,12 +123,12 @@ Show you have done your homework on {company}. Use one of:
 Format: "I was particularly impressed to read about [specific event / thing]. [Why it matters / what it signals]."
 If you are not certain of a specific recent event, reference something concrete and verifiable about the company (their product scale, a known technical challenge they solve, a public initiative). Do NOT invent fake news.
 
-2. MY EXPERIENCE (3-4 sentences)
-Tight, high-signal paragraph covering:
-- What I have done (relevant experience with metrics from the resume)
-- What I am doing now
-- Why I am moving toward this role (frame positively -- growth, scale, impact)
-- How my experience directly maps to {company}'s engineering challenges or product
+2. CAREER NARRATIVE & FIT (4-5 sentences)
+Zoom out to macro level, not a bullet recap:
+- Total years of experience and the general domain/scope (e.g. distributed backend systems at enterprise scale, across startup and larger-company environments)
+- The trajectory: how responsibility/ownership/impact grew over that time
+- Current status, stated accurately per the TIMELINE ACCURACY rules above -- if the candidate has recently finished their most recent role or degree, frame it as forward-looking momentum, not ongoing work
+- Explicitly tie this background to 2-3 of the most salient, concrete requirements or asks pulled from the JOB DESCRIPTION above (name the actual technology, scale, or responsibility from the JD and connect it to the candidate's background). This is the most important part of the letter -- make the alignment specific to this JD, not generic.
 
 3. WHY THIS COMPANY (2-3 sentences)
 Why specifically {company} and this role. Focus on:
@@ -325,6 +335,7 @@ class CoverLetterAgent(BaseAgent):
             self.build_system_message(COVER_LETTER_SYSTEM_PROMPT),
             self.build_user_message(
                 COVER_LETTER_USER_TEMPLATE.format(
+                    today_date=date.today().strftime("%B %Y"),
                     job_title=job_title,
                     company=company,
                     job_description=job_description or "No description provided.",
@@ -439,7 +450,11 @@ class CoverLetterAgent(BaseAgent):
         job_dir.mkdir(parents=True, exist_ok=True)
 
         raw_tex     = self._load_resume_text(category)
-        resume_text = strip_latex_to_text(raw_tex)[:3000] if raw_tex else ""
+        # 7000 chars is enough to cover the full stripped resume (work history,
+        # education, and projects), including dates -- truncating tighter cut
+        # off education/project end dates, which caused the LLM to lose track
+        # of what's actually still in progress vs finished.
+        resume_text = strip_latex_to_text(raw_tex)[:7000] if raw_tex else ""
 
         # ── 1. Extract address + hiring manager ───────────────────────────
         extraction: dict = {}

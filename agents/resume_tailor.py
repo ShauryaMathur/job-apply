@@ -22,27 +22,28 @@ logger = structlog.get_logger(__name__)
 
 TAILOR_SYSTEM_PROMPT = """You are an expert resume writer and ATS optimization specialist with deep LaTeX knowledge.
 
-Your task: Tailor the provided LaTeX resume to maximize ATS score for the given job description.
+Your task: Tailor the given LaTeX resume BODY to maximize ATS score for the given job description.
+
+You are given ONLY the resume body — the content between \\begin{document} and \\end{document}. The preamble (\\documentclass, \\usepackage lines, custom macro definitions) is handled separately by the calling code and is never shown to you or expected back from you. This is intentional — do not reference, guess at, or reconstruct it.
 
 STRICT RULES — follow exactly:
 
 FORMAT (non-negotiable):
-- Use the EXACT same LaTeX document class, packages, commands, and visual structure
-- Do NOT add new sections, rename sections, or change section order
+- Return ONLY the tailored body content — no \\documentclass, no \\usepackage lines, no \\begin{document}, no \\end{document}, no markdown fences, no explanations, no comments added by you
+- Use the exact same LaTeX commands, macros, and visual structure as the input body
+- Do NOT add new sections, rename sections, delete entire sections, or change section order. Every \section{...} header present in the input body (SKILLS, WORK EXPERIENCE, EDUCATION, PROJECTS, etc.) MUST still appear, uncommented, in your output — even if you have commented out most of that section's individual bullet points to save space. This applies especially to EDUCATION: never comment out or remove the education section or its degree/school/GPA line, no matter how tight the page limit is.
 - Do NOT change contact information, education, or company names/dates
 - Do NOT change any LaTeX formatting commands, spacing, or layout macros
-- Do NOT remove ANY line from the preamble (everything before \begin{document}). Copy it verbatim.
-- Return ONLY the complete raw LaTeX — no markdown fences, no explanations, no comments added by you
 - Do NOT use em dashes (— or \textemdash) or en dashes (– or \textendash); use a comma, semicolon, or rewrite the phrase instead
 
 PAGE LIMIT:
 - The resume MUST fit within 1 page
-- To stay within 1 page: REMOVE or COMMENT OUT less relevant bullet points using % in LaTeX
+- To stay within 1 page: REMOVE or COMMENT OUT less relevant bullet points using % in LaTeX, within a section — never comment out a section's header or delete the section entirely to save space
 - Prioritize bullet points that match the job description keywords; suppress weaker ones
 - Only exceed 1 page if the job requires so many distinct skills that omitting any would critically hurt the match score
 
 CONTENT CHANGES ALLOWED:
-- Update the resume headline role title (the \section{...} immediately after \begin{document}) to match the target role title from the job description exactly (e.g., change "Full Stack Software Engineer" → "Senior Software Engineer" if that is the JD title). This is an ATS keyword-match requirement, not fabrication.
+- Update the resume headline role title (the \section{...} at the top of the body) to match the target role title from the job description exactly (e.g., change "Full Stack Software Engineer" → "Senior Software Engineer" if that is the JD title). This is an ATS keyword-match requirement, not fabrication.
 - Reword bullet points to naturally incorporate keywords and phrases from the job description
 - Reorder bullet points within a role to surface the most relevant ones first
 - Update the summary/objective/profile section to directly mirror the role's language, seniority level, and key requirements
@@ -59,8 +60,8 @@ CONTROLLED FABRICATION (allowed in these specific cases only):
 
 NEVER fabricate: work history job titles, companies, employment dates, degrees, certifications, or entirely new projects. (The resume headline is NOT a work history title — updating it to match the JD is required.)"""
 
-TAILOR_USER_TEMPLATE = """MASTER RESUME (LaTeX):
-{resume_tex}
+TAILOR_USER_TEMPLATE = """MASTER RESUME BODY (LaTeX, preamble omitted — do not include a preamble in your response):
+{resume_body}
 
 JOB TITLE: {job_title}
 COMPANY: {company}
@@ -78,10 +79,10 @@ Instructions:
 7. Update the summary to directly mirror the role's language, seniority, and key requirements
 8. If the JD mentions AI coding assistants or developer productivity tools (GitHub Copilot, Claude, Cursor, Codeium, Tabnine, CodeWhisperer, etc.), uncomment the AI tools bullet in the RoundTechSquare section and replace [AI_TOOL] with the tool(s) named in the JD; also remove the two comment lines above it. If not mentioned, leave it commented.
 
-Return the complete tailored LaTeX code only. No explanations."""
+Return the tailored resume body only — no preamble, no \\begin{{document}}/\\end{{document}}, no explanations."""
 
 # Cached variant — resume block is separated so cache_control can be applied to it alone
-TAILOR_RESUME_BLOCK = "MASTER RESUME (LaTeX):\n{resume_tex}"
+TAILOR_RESUME_BLOCK = "MASTER RESUME BODY (LaTeX, preamble omitted — do not include a preamble in your response):\n{resume_body}"
 
 TAILOR_JOB_BLOCK = """JOB TITLE: {job_title}
 COMPANY: {company}
@@ -99,9 +100,11 @@ Instructions:
 7. Update the summary to directly mirror the role's language, seniority, and key requirements
 8. If the JD mentions AI coding assistants or developer productivity tools (GitHub Copilot, Claude, Cursor, Codeium, Tabnine, CodeWhisperer, etc.), uncomment the AI tools bullet in the RoundTechSquare section and replace [AI_TOOL] with the tool(s) named in the JD; also remove the two comment lines above it. If not mentioned, leave it commented.
 
-Return the complete tailored LaTeX code only. No explanations."""
+Return the tailored resume body only — no preamble, no \\begin{{document}}/\\end{{document}}, no explanations."""
 
 _CACHE_CONTROL_1H = {"type": "ephemeral", "ttl": "1h"}
+_DOC_BEGIN = r"\begin{document}"
+_DOC_END = r"\end{document}"
 
 
 class ResumeTailorAgent(BaseAgent):
@@ -291,14 +294,13 @@ class ResumeTailorAgent(BaseAgent):
         if not master_tex:
             raise ValueError(f"Master resume not found for category: {category}")
 
-        latex = await self._tailor_with_llm(
+        return await self._tailor_with_llm(
             master_tex=master_tex,
             job_title=title,
             company=company,
             job_description=description[:4000],
             use_cache=True,
         )
-        return self._ensure_preamble_fixes(latex)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -346,12 +348,106 @@ class ResumeTailorAgent(BaseAgent):
         job_description: str,
         use_cache: bool = False,
     ) -> str:
-        """Use LLM to tailor the LaTeX resume for the job."""
+        """
+        Tailor the resume for the job and return the full LaTeX document.
+
+        Only the BODY (the content between \\begin{document} and
+        \\end{document}) is sent to the LLM and tailored — the preamble
+        (\\documentclass, \\usepackage lines, macro definitions) is pure
+        boilerplate the model has no legitimate reason to touch, so it's
+        never shown to it and is spliced back in deterministically here.
+        This also means the model no longer has to spend output tokens
+        regenerating ~4,500 characters of unchanged preamble on every call.
+
+        Validates that every section present in the master resume survived
+        (the model sometimes deletes an entire section, e.g. EDUCATION, while
+        trimming for the 1-page limit) and retries once with a corrective
+        instruction if any are missing.
+        """
+        preamble, master_body = self._split_document(master_tex)
+        required_sections = self._extract_required_sections(master_body)
+
+        body = await self._call_tailor_llm(
+            master_body, job_title, company, job_description, use_cache
+        )
+        body = self._clean_tailor_body(body, master_body)
+
+        missing = self._missing_sections(body, required_sections)
+        if missing:
+            self.log.warning("tailor_dropped_sections", missing=missing)
+            retry_instruction = (
+                "\n\nIMPORTANT CORRECTION: your previous attempt deleted the "
+                f"following required section(s) entirely: {', '.join(missing)}. "
+                "Every section header from the master resume MUST remain, "
+                "uncommented, in the output, even if you comment out most of "
+                "that section's individual bullet points to save space. "
+                "Regenerate the complete resume body now, keeping every section header intact."
+            )
+            body_retry = await self._call_tailor_llm(
+                master_body, job_title, company, job_description, use_cache,
+                extra_instruction=retry_instruction,
+            )
+            body_retry = self._clean_tailor_body(body_retry, master_body)
+            still_missing = self._missing_sections(body_retry, required_sections)
+            if len(still_missing) < len(missing):
+                body, missing = body_retry, still_missing
+            if missing:
+                self.log.error("tailor_sections_still_missing_after_retry", missing=missing)
+
+        return preamble + body.strip() + "\n\n" + _DOC_END + "\n"
+
+    def _split_document(self, tex: str) -> tuple[str, str]:
+        """
+        Split a full LaTeX resume into (preamble, body).
+
+        preamble includes \\begin{document}; body is everything between
+        \\begin{document} and \\end{document} (exclusive of both the closing
+        tag and anything after it).
+        """
+        begin_idx = tex.find(_DOC_BEGIN)
+        end_idx = tex.rfind(_DOC_END)
+        if begin_idx == -1 or end_idx == -1:
+            raise ValueError("Master resume is missing \\begin{document} or \\end{document}")
+        preamble = tex[: begin_idx + len(_DOC_BEGIN)]
+        body = tex[begin_idx + len(_DOC_BEGIN): end_idx]
+        return preamble, body
+
+    def _extract_required_sections(self, master_body: str) -> list[str]:
+        """
+        Section header labels (e.g. "SKILLS", "EDUCATION") that must survive
+        tailoring. Skips the first section (the role headline) since its
+        wording is intentionally rewritten to match the JD title.
+        """
+        headers = re.findall(r"^\s*\\section\{([^}]*)\}", master_body, flags=re.MULTILINE)
+        return headers[1:]
+
+    def _missing_sections(self, tailored_tex: str, required_sections: list[str]) -> list[str]:
+        """Required section headers that are absent or commented out in the output."""
+        active_lines = "\n".join(
+            line for line in tailored_tex.split("\n") if not line.strip().startswith("%")
+        )
+        return [h for h in required_sections if f"\\section{{{h}}}" not in active_lines]
+
+    async def _call_tailor_llm(
+        self,
+        master_body: str,
+        job_title: str,
+        company: str,
+        job_description: str,
+        use_cache: bool,
+        extra_instruction: str = "",
+    ) -> str:
+        """Build the tailoring prompt (body only) and make the LLM call. Returns raw model output."""
         if use_cache:
             # Explicit cache breakpoints (1-hour TTL):
             # Block 1 — system prompt: static, cache for 1h
-            # Block 2 — master resume LaTeX: static per category, cache for 1h
+            # Block 2 — master resume body: static per category, cache for 1h
             # Block 3 — job-specific content: changes every call, not cached
+            job_block = TAILOR_JOB_BLOCK.format(
+                job_title=job_title,
+                company=company,
+                job_description=job_description or "No description provided",
+            ) + extra_instruction
             messages = [
                 {
                     "role": "system",
@@ -368,36 +464,31 @@ class ResumeTailorAgent(BaseAgent):
                     "content": [
                         {
                             "type": "text",
-                            "text": TAILOR_RESUME_BLOCK.format(resume_tex=master_tex),
+                            "text": TAILOR_RESUME_BLOCK.format(resume_body=master_body),
                             "cache_control": _CACHE_CONTROL_1H,
                         },
                         {
                             "type": "text",
-                            "text": TAILOR_JOB_BLOCK.format(
-                                job_title=job_title,
-                                company=company,
-                                job_description=job_description or "No description provided",
-                            ),
+                            "text": job_block,
                         },
                     ],
                 },
             ]
             self.log.info("resume_tailor_cache_enabled", ttl="1h")
         else:
+            user_text = TAILOR_USER_TEMPLATE.format(
+                resume_body=master_body,
+                job_title=job_title,
+                company=company,
+                job_description=job_description or "No description provided",
+            ) + extra_instruction
             messages = [
                 self.build_system_message(TAILOR_SYSTEM_PROMPT),
-                self.build_user_message(
-                    TAILOR_USER_TEMPLATE.format(
-                        resume_tex=master_tex,
-                        job_title=job_title,
-                        company=company,
-                        job_description=job_description or "No description provided",
-                    )
-                ),
+                self.build_user_message(user_text),
             ]
 
         try:
-            raw = await self.chat(
+            return await self.chat(
                 task="resume_tailor",
                 messages=messages,
                 temperature=0.2,
@@ -413,55 +504,32 @@ class ResumeTailorAgent(BaseAgent):
                 raise RuntimeError(f"LLM authentication error — check API key configuration") from None
             raise RuntimeError(f"LLM request failed during resume tailoring: {error_type}") from None
 
-        # Strip any markdown fences if model added them
+    def _clean_tailor_body(self, raw: str, master_body: str) -> str:
+        """
+        Strip markdown fences and validate the model's output looks like a
+        resume body. Defensively unwraps a \\begin{document}/\\end{document}
+        wrapper if the model added one anyway despite being told not to.
+        Falls back to the (untailored) master body if the output doesn't
+        look like a resume body at all.
+        """
         raw = self._strip_markdown_fences(raw)
 
-        # Inject preamble fixes the LLM may have accidentally dropped
-        raw = self._ensure_preamble_fixes(raw)
+        begin_idx = raw.find(_DOC_BEGIN)
+        end_idx = raw.rfind(_DOC_END)
+        if begin_idx != -1 and end_idx != -1 and end_idx > begin_idx:
+            raw = raw[begin_idx + len(_DOC_BEGIN): end_idx]
 
-        # Validate it looks like LaTeX
-        if "\\documentclass" not in raw and "\\begin{document}" not in raw:
-            self.log.warning(
-                "llm_output_not_latex",
-                preview=raw[:200],
-            )
-            # Fall back to master resume
-            return master_tex
+        if "\\section{" not in raw:
+            self.log.warning("llm_output_not_resume_body", preview=raw[:200])
+            return master_body
 
-        return raw
-
-    def _ensure_preamble_fixes(self, tex: str) -> str:
-        """
-        Inject required preamble lines the LLM may have dropped.
-        These are essential for XeLaTeX compilation and must always be present.
-        """
-        # hyperref crashes on \MakeUppercase in PDF bookmarks without this.
-        # The LLM sometimes regenerates the preamble without it.
-        hyperref = r"\usepackage[hidelinks]{hyperref}"
-        fix = r"\pdfstringdefDisableCommands{\def\MakeUppercase#1{#1}}"
-        if hyperref in tex and fix not in tex:
-            tex = tex.replace(hyperref, f"{hyperref}\n{fix}", 1)
-            self.log.info("preamble_fix_injected", fix="pdfstringdefDisableCommands")
-        return tex
+        return raw.strip()
 
     def _strip_markdown_fences(self, text: str) -> str:
-        """Remove markdown code fences and extract clean LaTeX from LLM output."""
-        # Remove ```latex ... ``` or ``` ... ```
+        """Remove markdown code fences the model may have wrapped its output in."""
         match = re.search(r"```(?:latex|tex)?\s*([\s\S]+?)```", text)
         if match:
             text = match.group(1).strip()
-
-        # Strip any prose before \documentclass (LLM sometimes adds preamble text)
-        doc_start = text.find("\\documentclass")
-        if doc_start > 0:
-            text = text[doc_start:]
-
-        # If output was truncated (no \end{document}), close the document
-        if "\\documentclass" in text and "\\end{document}" not in text:
-            self.log.warning("latex_truncated_appending_end_document")
-            # Close any open environments and the document
-            text = text.rstrip() + "\n\\end{document}\n"
-
         return text.strip()
 
     async def _compile_pdf(

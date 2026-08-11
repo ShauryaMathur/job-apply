@@ -315,14 +315,18 @@ class RankerAgent(BaseAgent):
         resume_text = strip_latex_to_text(tailored_latex)
         combined_jd = f"{title}\n{company}\n{description}"
 
-        # Embed both sides
+        # Embed both sides (full text, untruncated -- matches _score_job's
+        # embedding call, which also doesn't manually truncate combined_text)
         resume_emb = list(next(iter(self.embedder.embed([resume_text]))))
-        jd_emb = list(next(iter(self.embedder.embed([combined_jd[:2000]]))))
+        jd_emb = list(next(iter(self.embedder.embed([combined_jd]))))
         similarity = self._cosine_similarity(resume_emb, jd_emb)
 
-        # LLM score against tailored resume text
+        # LLM score against tailored resume text. Don't pre-truncate here --
+        # _llm_score_and_infer applies its own (much larger) cap, same as
+        # _score_job does for the master-resume pass, so both scoring paths
+        # see a comparable amount of actual resume content.
         llm_result = await self._llm_score_and_infer(
-            resume_text=resume_text[:2000],
+            resume_text=resume_text,
             job_title=title,
             job_company=company,
             job_description=description[:3000],
@@ -367,7 +371,12 @@ class RankerAgent(BaseAgent):
                 f"JOB TITLE: {job_title}\n"
                 f"COMPANY: {job_company}\n\n"
                 f"JOB DESCRIPTION:\n{job_description}\n\n"
-                f"CANDIDATE RESUME:\n{resume_text[:2000] if resume_text else 'Resume not available'}"
+                # 6000 chars comfortably covers a full stripped master or
+                # tailored resume (preamble now stripped out by
+                # strip_latex_to_text) -- Work Experience and Education both
+                # need to be visible for the "experience level"/"education"
+                # scoring weights to mean anything.
+                f"CANDIDATE RESUME:\n{resume_text[:6000] if resume_text else 'Resume not available'}"
             ),
         ]
 

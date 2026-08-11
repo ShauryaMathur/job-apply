@@ -6,7 +6,18 @@ import re
 
 
 def strip_latex_to_text(tex: str) -> str:
-    """Strip LaTeX commands and extract readable plain text."""
+    """Strip LaTeX commands and extract readable plain text.
+
+    Drops everything before \\begin{document} first -- package imports and
+    \\newcommand macro definitions aren't readable content, but left in they
+    flatten down to hundreds of chars of junk tokens (package names, macro
+    args) at the very front of the output. Callers that truncate this text
+    to a char budget (LLM prompts, scoring calls) would otherwise burn most
+    of that budget on preamble noise before reaching any real resume content.
+    """
+    doc_start = tex.find(r"\begin{document}")
+    if doc_start != -1:
+        tex = tex[doc_start + len(r"\begin{document}"):]
     # Remove comments
     tex = re.sub(r"%.*$", "", tex, flags=re.MULTILINE)
     # Remove \command[...]{...} -> keep content
