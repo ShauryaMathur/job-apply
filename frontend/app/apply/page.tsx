@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,24 +21,43 @@ import {
   PenLine,
 } from "lucide-react";
 import { ingestJobUrl, type JobInfo } from "@/lib/api";
+import { extractSourceFromUrl, SOURCE_LABELS } from "@/lib/constants";
 
 export default function ApplyPage() {
   const [url, setUrl] = useState("");
   const [category, setCategory] = useState("backend");
   const [manualDescription, setManualDescription] = useState("");
   const [showManualPaste, setShowManualPaste] = useState(false);
+  const [source, setSource] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const abortController = useRef<AbortController | null>(null);
+
+  const isValidUrl = (val: string) => {
+    try {
+      const u = new URL(val.trim());
+      return u.protocol === "http:" || u.protocol === "https:";
+    } catch {
+      return false;
+    }
+  };
+
+  const urlTouched = url.length > 0;
+  const urlValid = isValidUrl(url);
+  // Can submit if: URL is valid, OR no URL but description is provided
+  const canSubmit = urlValid || (!url.trim() && manualDescription.trim().length > 0);
 
   // After successful ingest
   const [successJobId, setSuccessJobId] = useState<string | null>(null);
   const [successJobInfo, setSuccessJobInfo] = useState<JobInfo | null>(null);
 
   const handleIngest = useCallback(async () => {
+    if (!canSubmit) return;
     const trimmed = url.trim();
-    if (!trimmed) return;
 
+    const controller = new AbortController();
+    abortController.current = controller;
     setLoading(true);
     setLoadError(null);
     setSuccessJobId(null);
@@ -46,22 +65,34 @@ export default function ApplyPage() {
 
     try {
       const desc = manualDescription.trim() || undefined;
-      const result = await ingestJobUrl(trimmed, category, desc);
+      const result = await ingestJobUrl(trimmed || undefined, category, desc, controller.signal, source || undefined);
       setSuccessJobId(result.job_id);
       setSuccessJobInfo(result.job_info);
     } catch (e) {
+      if ((e as Error).name === "AbortError") return;
       const msg = e instanceof Error ? e.message : "Failed to analyze job URL";
       setLoadError(msg);
       if (msg.toLowerCase().includes("javascript") || msg.toLowerCase().includes("paste")) {
         setShowManualPaste(true);
       }
     } finally {
+      abortController.current = null;
       setLoading(false);
     }
-  }, [url, category, manualDescription]);
+  }, [url, category, manualDescription, canSubmit, source]);
+
+  const handleUrlChange = (val: string) => {
+    setUrl(val);
+    // Auto-detect source from URL, only if user hasn't manually overridden it
+    if (isValidUrl(val)) {
+      const detected = extractSourceFromUrl(val);
+      if (detected) setSource(detected);
+    }
+  };
 
   const handleReset = () => {
     setUrl("");
+    setSource("");
     setManualDescription("");
     setShowManualPaste(false);
     setLoadError(null);
@@ -73,7 +104,7 @@ export default function ApplyPage() {
     <div className="flex flex-col gap-6 max-w-2xl mx-auto w-full">
       {/* Page header */}
       <div>
-        <h1 className="text-xl font-bold">Apply Tool</h1>
+        <h1 className="text-xl font-bold">Scout</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
           Paste a job URL to scrape, extract, and generate a tailored LaTeX resume saved to your dashboard.
         </p>
@@ -90,10 +121,14 @@ export default function ApplyPage() {
                   type="url"
                   placeholder="https://jobs.lever.co/... or any job posting URL"
                   value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleIngest()}
+                  onChange={(e) => handleUrlChange(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && canSubmit && handleIngest()}
                   disabled={loading}
-                  className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                  className={`w-full pl-9 pr-3 py-2 text-sm rounded-md border bg-background focus:outline-none focus:ring-1 disabled:opacity-60 ${
+                    urlTouched && !urlValid
+                      ? "border-destructive focus:ring-destructive"
+                      : "border-input focus:ring-ring"
+                  }`}
                 />
               </div>
               <Select value={category} onValueChange={setCategory} disabled={loading}>
@@ -108,7 +143,7 @@ export default function ApplyPage() {
               </Select>
               <Button
                 onClick={handleIngest}
-                disabled={loading || !url.trim()}
+                disabled={loading || !canSubmit}
                 className="gap-2 shrink-0"
               >
                 {loading ? (
@@ -121,21 +156,38 @@ export default function ApplyPage() {
               </Button>
             </div>
 
-            {loadError && (
-              <div className="mt-2 space-y-2">
-                <p className="flex items-center gap-1.5 text-destructive text-sm">
-                  <AlertCircle className="h-4 w-4 shrink-0" />
-                  {loadError}
-                </p>
-                {!showManualPaste && (
-                  <button
-                    onClick={() => setShowManualPaste(true)}
-                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <ClipboardPaste className="h-3.5 w-3.5" />
-                    Paste job description manually instead
-                  </button>
-                )}
+            {urlTouched && !urlValid && (
+              <p className="mt-1.5 text-xs text-destructive">
+                Enter a valid URL starting with https://
+              </p>
+            )}
+
+            {/* Source — auto-detected from URL, manually editable */}
+            <div className="mt-2 flex items-center gap-2">
+              <label className="text-xs text-muted-foreground shrink-0">Source</label>
+              <input
+                type="text"
+                placeholder={urlValid ? (extractSourceFromUrl(url) || "auto-detect…") : "e.g. LinkedIn, Lever (optional)"}
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+                disabled={loading}
+                className="flex-1 px-2 py-1 text-xs rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              />
+              {source && SOURCE_LABELS[source] && source !== SOURCE_LABELS[source].toLowerCase() && (
+                <span className="text-xs text-muted-foreground">{SOURCE_LABELS[source]}</span>
+              )}
+            </div>
+
+            {/* Always-visible toggle for manual description */}
+            {!showManualPaste && (
+              <div className="mt-2">
+                <button
+                  onClick={() => setShowManualPaste(true)}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ClipboardPaste className="h-3.5 w-3.5" />
+                  Add job description manually
+                </button>
               </div>
             )}
 
@@ -150,7 +202,7 @@ export default function ApplyPage() {
                     onClick={() => { setShowManualPaste(false); setManualDescription(""); }}
                     className="text-xs text-muted-foreground hover:text-foreground"
                   >
-                    Cancel
+                    Hide
                   </button>
                 </div>
                 <textarea
@@ -161,9 +213,16 @@ export default function ApplyPage() {
                   className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring resize-none font-mono"
                 />
                 <p className="text-xs text-muted-foreground">
-                  The URL is still used for reference. Description replaces the scrape.
+                  URL is used for reference only. Description overrides scraping.
                 </p>
               </div>
+            )}
+
+            {loadError && (
+              <p className="mt-2 flex items-center gap-1.5 text-destructive text-sm">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                {loadError}
+              </p>
             )}
           </CardContent>
         </Card>
@@ -175,6 +234,12 @@ export default function ApplyPage() {
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
           <p className="text-sm font-medium">Scraping job page and tailoring your resume…</p>
           <p className="text-xs">Scrape → extract → LLM tailor → save. Takes ~45 seconds.</p>
+          <button
+            onClick={() => { abortController.current?.abort(); setLoading(false); }}
+            className="text-xs text-muted-foreground hover:text-destructive mt-1"
+          >
+            cancel
+          </button>
         </div>
       )}
 

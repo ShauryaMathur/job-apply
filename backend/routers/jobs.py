@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
+from backend.deps import get_job_or_404
 from backend.models import Job
 from backend.schemas import JobListResponse, JobOut, JobUpdate, StatsResponse
 from backend.storage import get_storage
@@ -115,26 +116,18 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{job_id}", response_model=JobOut)
-async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
+async def get_job(job: Job = Depends(get_job_or_404)):
     """Get a single job by its Indeed job_id."""
-    result = await db.execute(select(Job).where(Job.job_id == job_id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     return JobOut.model_validate(job)
 
 
 @router.patch("/{job_id}", response_model=JobOut)
 async def update_job(
-    job_id: str,
     payload: JobUpdate,
+    job: Job = Depends(get_job_or_404),
     db: AsyncSession = Depends(get_db),
 ):
     """Update job status, notes, or other fields."""
-    result = await db.execute(select(Job).where(Job.job_id == job_id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     update_data = payload.model_dump(exclude_unset=True)
     if not update_data:
@@ -146,23 +139,18 @@ async def update_job(
     await db.flush()
     await db.refresh(job)
 
-    logger.info("job_updated", job_id=job_id, fields=list(update_data.keys()))
+    logger.info("job_updated", job_id=job.job_id, fields=list(update_data.keys()))
     return JobOut.model_validate(job)
 
 
 @router.get("/{job_id}/resume")
 async def download_resume(
-    job_id: str,
-    db: AsyncSession = Depends(get_db),
+    job: Job = Depends(get_job_or_404),
 ):
     """
     Download the tailored resume PDF for a job.
     Tries local file first, falls back to S3.
     """
-    result = await db.execute(select(Job).where(Job.job_id == job_id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     # Try local file
     if job.resume_file:
@@ -202,14 +190,9 @@ async def download_resume(
 
 @router.get("/{job_id}/cover-letter")
 async def download_cover_letter(
-    job_id: str,
-    db: AsyncSession = Depends(get_db),
+    job: Job = Depends(get_job_or_404),
 ):
     """Download the cover letter for a job."""
-    result = await db.execute(select(Job).where(Job.job_id == job_id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     if job.cover_letter_file:
         local_path = Path(job.cover_letter_file)
@@ -236,14 +219,9 @@ async def download_cover_letter(
 
 @router.get("/{job_id}/email")
 async def download_email(
-    job_id: str,
-    db: AsyncSession = Depends(get_db),
+    job: Job = Depends(get_job_or_404),
 ):
     """Download the outreach email for a job."""
-    result = await db.execute(select(Job).where(Job.job_id == job_id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     if job.email_file:
         local_path = Path(job.email_file)
@@ -264,14 +242,10 @@ async def download_email(
 
 @router.post("/{job_id}/generate/resume", response_model=JobOut)
 async def generate_resume(
-    job_id: str,
+    job: Job = Depends(get_job_or_404),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate tailored LaTeX resume for a job and save to DB. PDF is compiled in the editor."""
-    result = await db.execute(select(Job).where(Job.job_id == job_id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     from backend.config import get_full_config
     from agents.resume_tailor import ResumeTailorAgent
@@ -287,42 +261,92 @@ async def generate_resume(
             category=job.role_category,
         )
     except Exception as e:
-        logger.error("resume_tailor_failed", job_id=job_id, error=str(e))
+        logger.error("resume_tailor_failed", job_id=job.job_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"Resume generation failed: {e}")
 
     job.latex_content = latex
+
+    # Score tailored resume vs JD (non-fatal — always rescore with the new tailored output)
+    try:
+        from agents.ranker import RankerAgent
+        ranker = RankerAgent(config)
+        scored = await ranker.score_tailored_resume(
+            job={
+                "job_id": job.job_id,
+                "title": job.title,
+                "company": job.company,
+                "description": job.description or "",
+                "role_category": job.role_category,
+            },
+            tailored_latex=latex,
+        )
+        job.match_score = scored.get("match_score")
+        if job.h1b_likely is None:
+            job.h1b_likely = scored.get("h1b_likely")
+            job.h1b_notes = scored.get("h1b_notes")
+    except Exception as e:
+        logger.warning("generate_resume_scoring_failed", job_id=job.job_id, error=str(e))
+
     await db.flush()
     await db.refresh(job)
 
     return JobOut.model_validate(job)
 
 
+@router.post("/{job_id}/rescore", response_model=JobOut)
+async def rescore_job(
+    job: Job = Depends(get_job_or_404),
+    db: AsyncSession = Depends(get_db),
+):
+    """Rescore a job's match score against its current latex_content."""
+    if not job.latex_content:
+        raise HTTPException(status_code=400, detail="No LaTeX content to score against")
+
+    from backend.config import get_full_config
+    from agents.ranker import RankerAgent
+
+    config = get_full_config()
+    try:
+        ranker = RankerAgent(config)
+        scored = await ranker.score_tailored_resume(
+            job={
+                "job_id": job.job_id,
+                "title": job.title,
+                "company": job.company,
+                "description": job.description or "",
+                "role_category": job.role_category,
+            },
+            tailored_latex=job.latex_content,
+        )
+        job.match_score = scored.get("match_score")
+    except Exception as e:
+        logger.error("rescore_failed", job_id=job.job_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Rescore failed: {e}")
+
+    await db.flush()
+    await db.refresh(job)
+    logger.info("job_rescored", job_id=job.job_id, score=job.match_score)
+    return JobOut.model_validate(job)
+
+
 @router.delete("/{job_id}", status_code=204)
 async def delete_job(
-    job_id: str,
+    job: Job = Depends(get_job_or_404),
     db: AsyncSession = Depends(get_db),
 ):
     """Soft-delete a job by setting deleted_at."""
     from datetime import datetime, timezone
-    result = await db.execute(select(Job).where(Job.job_id == job_id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     job.deleted_at = datetime.now(timezone.utc)
     await db.flush()
-    logger.info("job_soft_deleted", job_id=job_id)
+    logger.info("job_soft_deleted", job_id=job.job_id)
 
 
 @router.post("/{job_id}/generate/cover-letter", response_model=JobOut)
 async def generate_cover_letter_doc(
-    job_id: str,
+    job: Job = Depends(get_job_or_404),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate cover letter and outreach email for a specific job."""
-    result = await db.execute(select(Job).where(Job.job_id == job_id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     from backend.config import get_full_config
     from agents.cover_letter import CoverLetterAgent
@@ -340,11 +364,14 @@ async def generate_cover_letter_doc(
     try:
         job_dict = await CoverLetterAgent(config).generate_cover_letter(job_dict)
     except Exception as e:
-        logger.error("cover_letter_failed", job_id=job_id, error=str(e))
+        logger.error("cover_letter_failed", job_id=job.job_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"Cover letter generation failed: {e}")
 
-    for field in ("cover_letter_file", "email_file", "s3_cover_letter_url"):
-        setattr(job, field, job_dict.get(field))
+    for field in ("cover_letter_file", "email_file", "s3_cover_letter_url",
+                  "cover_letter_latex", "company_address", "hiring_manager"):
+        val = job_dict.get(field)
+        if val is not None:
+            setattr(job, field, val)
     await db.flush()
     await db.refresh(job)
 

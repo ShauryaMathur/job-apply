@@ -29,6 +29,9 @@ export interface Job {
   s3_resume_url: string | null;
   s3_cover_letter_url: string | null;
   latex_content: string | null;
+  cover_letter_latex: string | null;
+  company_address: string | null;
+  hiring_manager: string | null;
   deleted_at: string | null;
   notes: string | null;
   created_at: string | null;
@@ -78,6 +81,17 @@ export interface PipelineTriggerRequest {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function throwIfNotOk(res: Response, defaultMsg: string): Promise<void> {
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `${defaultMsg}: ${res.status}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Jobs
 // ---------------------------------------------------------------------------
 
@@ -115,7 +129,7 @@ export async function fetchStats(): Promise<StatsResponse> {
 
 export async function updateJob(
   jobId: string,
-  data: { status?: string; notes?: string }
+  data: { status?: string; notes?: string; title?: string; company?: string; source?: string }
 ): Promise<Job> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}`, {
     method: "PATCH",
@@ -191,19 +205,24 @@ export interface CompileLatexResponse {
 }
 
 export async function ingestJobUrl(
-  url: string,
+  url: string | undefined,
   roleCategory: string,
-  description?: string
+  description?: string,
+  signal?: AbortSignal,
+  source?: string,
 ): Promise<IngestUrlResponse> {
   const res = await fetch(`${API_BASE}/tools/ingest-url`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url, role_category: roleCategory, ...(description ? { description } : {}) }),
+    body: JSON.stringify({
+      ...(url ? { url } : {}),
+      role_category: roleCategory,
+      ...(description ? { description } : {}),
+      ...(source ? { source } : {}),
+    }),
+    signal,
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Ingest failed: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Ingest failed");
   return res.json();
 }
 
@@ -215,49 +234,52 @@ export async function compileLatex(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tex_content: texContent }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Compile failed: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Compile failed");
   return res.json();
 }
 
 export async function cancelPipeline(runId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/pipeline/${runId}/cancel`, { method: "POST" });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Cancel failed: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Cancel failed");
 }
 
-export async function generateResume(jobId: string): Promise<Job> {
-  const res = await fetch(`${API_BASE}/jobs/${jobId}/generate/resume`, {
-    method: "POST",
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Resume generation failed: ${res.status}`);
-  }
+export async function rescoreJob(jobId: string): Promise<Job> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/rescore`, { method: "POST" });
+  await throwIfNotOk(res, "Rescore failed");
   return res.json();
 }
 
-export async function generateCoverLetter(jobId: string): Promise<Job> {
+export async function generateResume(jobId: string, signal?: AbortSignal): Promise<Job> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/generate/resume`, {
+    method: "POST",
+    signal,
+  });
+  await throwIfNotOk(res, "Resume generation failed");
+  return res.json();
+}
+
+export async function generateCoverLetter(jobId: string, signal?: AbortSignal): Promise<Job> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}/generate/cover-letter`, {
     method: "POST",
+    signal,
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Cover letter generation failed: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Cover letter generation failed");
   return res.json();
 }
 
 export async function deleteJob(jobId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}`, { method: "DELETE" });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Delete failed: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Delete failed");
+}
+
+export async function saveCoverLetterLatex(jobId: string, latexContent: string): Promise<Job> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cover_letter_latex: latexContent }),
+  });
+  await throwIfNotOk(res, "Save failed");
+  return res.json();
 }
 
 export async function saveLatex(jobId: string, latexContent: string): Promise<Job> {
@@ -266,10 +288,7 @@ export async function saveLatex(jobId: string, latexContent: string): Promise<Jo
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ latex_content: latexContent }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Save failed: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Save failed");
   return res.json();
 }
 

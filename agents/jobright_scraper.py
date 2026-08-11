@@ -91,6 +91,9 @@ class JobrightScraper(BaseAgent):
         self._total     = sum(
             c.get("count", 10) for c in self.categories if c.get("enabled", True)
         )
+        # Collect 2x more stubs than needed to absorb losses from:
+        # category misclassification, detail-page failures, and already-in-DB jobs.
+        self._collect_target = self._total * 2
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -104,7 +107,7 @@ class JobrightScraper(BaseAgent):
         cookies = json.loads(COOKIES_FILE.read_text())
 
         if log_callback:
-            await log_callback(f"[jobright] Collecting links from Recommended feed (want {self._total})")
+            await log_callback(f"[jobright] Collecting links from Recommended feed (want {self._total}, fetching up to {self._collect_target})")
 
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(
@@ -183,7 +186,7 @@ class JobrightScraper(BaseAgent):
             if log_callback and new:
                 await log_callback(f"[jobright] {len(stubs)} links collected...")
 
-            if len(stubs) >= self._total:
+            if len(stubs) >= self._collect_target:
                 break
 
             # Scroll to load more cards
@@ -199,7 +202,7 @@ class JobrightScraper(BaseAgent):
             if not new and attempt > 2:
                 break   # no new cards after several scrolls
 
-        return stubs[:self._total]
+        return stubs[:self._collect_target]
 
     def _parse_stubs(self, html: str, seen: set[str]) -> list[dict]:
         """Extract job card stubs from the recommend feed HTML."""
@@ -256,12 +259,18 @@ class JobrightScraper(BaseAgent):
                     break
 
             # Location
+            # Jobright cards prefix city names with a work-type label ("Company" = on-site,
+            # "Hybrid", "Stage", etc.) — strip those before accepting the match.
+            _WORK_TYPE_PREFIX = re.compile(
+                r"^(Company|Stage|Hybrid|Contract|Part[\-\s]time|Full[\-\s]time)\s+", re.I
+            )
             location = ""
             m = re.search(
                 r"\b([A-Z][a-z]+(?: [A-Z][a-z]+)?,\s*[A-Z]{2}|Remote|United States)\b",
                 card_text,
             )
-            if m: location = m.group(1)
+            if m:
+                location = _WORK_TYPE_PREFIX.sub("", m.group(1)).strip()
 
             # Posted time
             posted_at = None

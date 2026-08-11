@@ -33,6 +33,7 @@ FORMAT (non-negotiable):
 - Do NOT change any LaTeX formatting commands, spacing, or layout macros
 - Do NOT remove ANY line from the preamble (everything before \begin{document}). Copy it verbatim.
 - Return ONLY the complete raw LaTeX — no markdown fences, no explanations, no comments added by you
+- Do NOT use em dashes (— or \textemdash) or en dashes (– or \textendash); use a comma, semicolon, or rewrite the phrase instead
 
 PAGE LIMIT:
 - The resume MUST fit within 1 page
@@ -41,20 +42,22 @@ PAGE LIMIT:
 - Only exceed 1 page if the job requires so many distinct skills that omitting any would critically hurt the match score
 
 CONTENT CHANGES ALLOWED:
+- Update the resume headline role title (the \section{...} immediately after \begin{document}) to match the target role title from the job description exactly (e.g., change "Full Stack Software Engineer" → "Senior Software Engineer" if that is the JD title). This is an ATS keyword-match requirement, not fabrication.
 - Reword bullet points to naturally incorporate keywords and phrases from the job description
 - Reorder bullet points within a role to surface the most relevant ones first
-- Update the summary/objective/profile section to directly mirror the role's language
+- Update the summary/objective/profile section to directly mirror the role's language, seniority level, and key requirements
 - Adjust the skills section: reorder, add closely adjacent technologies, remove irrelevant ones
 
 CONTROLLED FABRICATION (allowed in these specific cases only):
 1. NUMBERS: If an achievement has no metric (e.g. "improved query performance"), you MAY add a plausible approximate figure (e.g. "improved query performance by ~35%"). Use "~" prefix to signal approximation. Keep it realistic and conservative.
-2. ADJACENT TECHNOLOGIES: If the job description mentions a tool that is a direct equivalent or common companion to something already in the resume, you MAY add it alongside the existing one. Examples:
+2. AI CODING TOOLS BULLET: The RoundTechSquare experience contains a commented-out bullet with the placeholder [AI_TOOL]. If the job description explicitly mentions AI coding assistants or developer productivity tools (e.g. GitHub Copilot, Claude, Cursor, Codeium, Tabnine, Amazon CodeWhisperer, or similar), you MUST uncomment that bullet and replace [AI_TOOL] with the exact tool(s) named in the JD. Remove the two comment lines above it (the instruction comment). If the JD does not mention any such tool, leave the bullet commented out.
+3. ADJACENT TECHNOLOGIES: If the job description mentions a tool that is a direct equivalent or common companion to something already in the resume, you MAY add it alongside the existing one. Examples:
    - Resume has "ELK Stack" → JD mentions "Kibana" → add "Kibana" explicitly
    - Resume has "distributed tracing" → JD mentions "OpenTelemetry" → add "OpenTelemetry"
    - Resume has "Prometheus" → JD mentions "Grafana" → add "Grafana"
    - Only do this for technologies you are certain are adjacent — do NOT invent unrelated skills
 
-NEVER fabricate: job titles, companies, employment dates, degrees, certifications, or entirely new projects."""
+NEVER fabricate: work history job titles, companies, employment dates, degrees, certifications, or entirely new projects. (The resume headline is NOT a work history title — updating it to match the JD is required.)"""
 
 TAILOR_USER_TEMPLATE = """MASTER RESUME (LaTeX):
 {resume_tex}
@@ -67,11 +70,13 @@ JOB DESCRIPTION:
 
 Instructions:
 1. Identify the top keywords, required skills, and technologies from the job description
-2. Comment out (%) bullet points least relevant to this role to stay within 1 page
-3. Reword remaining bullets to naturally use the JD's language and keywords
-4. Add plausible approximate metrics (~N%) where achievements lack numbers
-5. Add adjacent technologies where the JD explicitly calls for tools closely related to what's already in the resume
-6. Update the summary to directly reflect this role
+2. Update the resume headline role title (\section{{...}}) to exactly match the JD job title
+3. Comment out (%) bullet points least relevant to this role to stay within 1 page
+4. Reword remaining bullets to naturally use the JD's language and keywords
+5. Add plausible approximate metrics (~N%) where achievements lack numbers
+6. Add adjacent technologies where the JD explicitly calls for tools closely related to what's already in the resume
+7. Update the summary to directly mirror the role's language, seniority, and key requirements
+8. If the JD mentions AI coding assistants or developer productivity tools (GitHub Copilot, Claude, Cursor, Codeium, Tabnine, CodeWhisperer, etc.), uncomment the AI tools bullet in the RoundTechSquare section and replace [AI_TOOL] with the tool(s) named in the JD; also remove the two comment lines above it. If not mentioned, leave it commented.
 
 Return the complete tailored LaTeX code only. No explanations."""
 
@@ -86,11 +91,13 @@ JOB DESCRIPTION:
 
 Instructions:
 1. Identify the top keywords, required skills, and technologies from the job description
-2. Comment out (%) bullet points least relevant to this role to stay within 1 page
-3. Reword remaining bullets to naturally use the JD's language and keywords
-4. Add plausible approximate metrics (~N%) where achievements lack numbers
-5. Add adjacent technologies where the JD explicitly calls for tools closely related to what's already in the resume
-6. Update the summary to directly reflect this role
+2. Update the resume headline role title (\section{{...}}) to exactly match the JD job title
+3. Comment out (%) bullet points least relevant to this role to stay within 1 page
+4. Reword remaining bullets to naturally use the JD's language and keywords
+5. Add plausible approximate metrics (~N%) where achievements lack numbers
+6. Add adjacent technologies where the JD explicitly calls for tools closely related to what's already in the resume
+7. Update the summary to directly mirror the role's language, seniority, and key requirements
+8. If the JD mentions AI coding assistants or developer productivity tools (GitHub Copilot, Claude, Cursor, Codeium, Tabnine, CodeWhisperer, etc.), uncomment the AI tools bullet in the RoundTechSquare section and replace [AI_TOOL] with the tool(s) named in the JD; also remove the two comment lines above it. If not mentioned, leave it commented.
 
 Return the complete tailored LaTeX code only. No explanations."""
 
@@ -112,18 +119,6 @@ class ResumeTailorAgent(BaseAgent):
         self.pdf_worker_url = config.get("pdf_worker", {}).get(
             "service_url", "http://pdfworker:8001"
         )
-
-        # HTTP client for PDF worker
-        self._http_client: Optional[httpx.AsyncClient] = None
-
-    async def _get_http_client(self) -> httpx.AsyncClient:
-        if self._http_client is None or self._http_client.is_closed:
-            self._http_client = httpx.AsyncClient(timeout=120.0)
-        return self._http_client
-
-    async def close(self) -> None:
-        if self._http_client and not self._http_client.is_closed:
-            await self._http_client.aclose()
 
     async def tailor_resume(
         self,

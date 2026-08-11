@@ -57,7 +57,7 @@ export default function Dashboard() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            All jobs — scraped by pipeline or added manually via Apply Tool.
+            All jobs — discovered by Radar or manually added via Scout.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -79,7 +79,7 @@ export default function Dashboard() {
           <a href="/pipeline">
             <Button size="sm" className="gap-1.5">
               <Play className="h-3.5 w-3.5" />
-              Run Pipeline
+              Run Radar
             </Button>
           </a>
         </div>
@@ -105,13 +105,13 @@ export default function Dashboard() {
           <div className="text-5xl">&#128269;</div>
           <h2 className="text-xl font-semibold">No Jobs Yet</h2>
           <p className="text-muted-foreground max-w-md">
-            Run the pipeline to scrape and rank jobs, or use the{" "}
-            <a href="/apply" className="underline">Apply Tool</a> to manually add a job.
+            Run Radar to scrape and rank jobs, or use{" "}
+            <a href="/apply" className="underline">Scout</a> to manually add a job.
           </p>
           <a href="/pipeline">
             <Button className="gap-2">
               <Play className="h-4 w-4" />
-              Go to Pipeline
+              Go to Radar
             </Button>
           </a>
         </div>
