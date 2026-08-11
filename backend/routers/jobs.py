@@ -367,8 +367,11 @@ async def generate_cover_letter_doc(
         logger.error("cover_letter_failed", job_id=job.job_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"Cover letter generation failed: {e}")
 
-    for field in ("cover_letter_file", "email_file", "s3_cover_letter_url"):
-        setattr(job, field, job_dict.get(field))
+    for field in ("cover_letter_file", "email_file", "s3_cover_letter_url",
+                  "cover_letter_latex", "company_address", "hiring_manager"):
+        val = job_dict.get(field)
+        if val is not None:
+            setattr(job, field, val)
     await db.flush()
     await db.refresh(job)
 

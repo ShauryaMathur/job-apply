@@ -78,6 +78,11 @@ CREATE TABLE IF NOT EXISTS pipeline_logs (
 CREATE INDEX IF NOT EXISTS idx_pipeline_logs_run_id ON pipeline_logs(run_id);
 CREATE INDEX IF NOT EXISTS idx_pipeline_logs_timestamp ON pipeline_logs(timestamp DESC);
 
+-- Migration: cover letter LaTeX columns (safe to run on existing DB)
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cover_letter_latex TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS company_address TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS hiring_manager TEXT;
+
 -- ============================================================
 -- Auto-update updated_at trigger
 -- ============================================================

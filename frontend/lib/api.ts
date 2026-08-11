@@ -29,6 +29,9 @@ export interface Job {
   s3_resume_url: string | null;
   s3_cover_letter_url: string | null;
   latex_content: string | null;
+  cover_letter_latex: string | null;
+  company_address: string | null;
+  hiring_manager: string | null;
   deleted_at: string | null;
   notes: string | null;
   created_at: string | null;
@@ -75,6 +78,17 @@ export interface PipelineTriggerRequest {
   source?: "jobright" | "indeed" | null;
   hours_old?: number | null;
   roles?: Record<string, RoleConfig> | null;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function throwIfNotOk(res: Response, defaultMsg: string): Promise<void> {
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `${defaultMsg}: ${res.status}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -208,10 +222,7 @@ export async function ingestJobUrl(
     }),
     signal,
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Ingest failed: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Ingest failed");
   return res.json();
 }
 
@@ -223,27 +234,18 @@ export async function compileLatex(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tex_content: texContent }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Compile failed: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Compile failed");
   return res.json();
 }
 
 export async function cancelPipeline(runId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/pipeline/${runId}/cancel`, { method: "POST" });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Cancel failed: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Cancel failed");
 }
 
 export async function rescoreJob(jobId: string): Promise<Job> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}/rescore`, { method: "POST" });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Rescore failed: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Rescore failed");
   return res.json();
 }
 
@@ -252,10 +254,7 @@ export async function generateResume(jobId: string, signal?: AbortSignal): Promi
     method: "POST",
     signal,
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Resume generation failed: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Resume generation failed");
   return res.json();
 }
 
@@ -264,19 +263,23 @@ export async function generateCoverLetter(jobId: string, signal?: AbortSignal): 
     method: "POST",
     signal,
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Cover letter generation failed: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Cover letter generation failed");
   return res.json();
 }
 
 export async function deleteJob(jobId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}`, { method: "DELETE" });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Delete failed: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Delete failed");
+}
+
+export async function saveCoverLetterLatex(jobId: string, latexContent: string): Promise<Job> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cover_letter_latex: latexContent }),
+  });
+  await throwIfNotOk(res, "Save failed");
+  return res.json();
 }
 
 export async function saveLatex(jobId: string, latexContent: string): Promise<Job> {
@@ -285,10 +288,7 @@ export async function saveLatex(jobId: string, latexContent: string): Promise<Jo
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ latex_content: latexContent }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Save failed: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Save failed");
   return res.json();
 }
 

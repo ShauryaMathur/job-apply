@@ -120,18 +120,6 @@ class ResumeTailorAgent(BaseAgent):
             "service_url", "http://pdfworker:8001"
         )
 
-        # HTTP client for PDF worker
-        self._http_client: Optional[httpx.AsyncClient] = None
-
-    async def _get_http_client(self) -> httpx.AsyncClient:
-        if self._http_client is None or self._http_client.is_closed:
-            self._http_client = httpx.AsyncClient(timeout=120.0)
-        return self._http_client
-
-    async def close(self) -> None:
-        if self._http_client and not self._http_client.is_closed:
-            await self._http_client.aclose()
-
     async def tailor_resume(
         self,
         job: dict,

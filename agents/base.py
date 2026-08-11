@@ -10,6 +10,7 @@ import os
 import time
 from typing import Any, Optional
 
+import httpx
 import structlog
 import litellm
 from litellm import acompletion
@@ -201,3 +202,15 @@ class BaseAgent:
     def build_assistant_message(self, content: str) -> dict:
         """Helper to build an assistant message dict."""
         return {"role": "assistant", "content": content}
+
+    async def _get_http_client(self) -> httpx.AsyncClient:
+        """Return a shared async HTTP client, creating it on first use."""
+        if not hasattr(self, "_http_client") or self._http_client is None or self._http_client.is_closed:
+            self._http_client: httpx.AsyncClient = httpx.AsyncClient(timeout=120.0)
+        return self._http_client
+
+    async def close(self) -> None:
+        """Close the shared HTTP client if open."""
+        client = getattr(self, "_http_client", None)
+        if client and not client.is_closed:
+            await client.aclose()

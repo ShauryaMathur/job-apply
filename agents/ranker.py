@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -20,6 +19,7 @@ from fastembed import TextEmbedding
 
 from agents.base import BaseAgent
 from agents.constants import RESUME_CATEGORY_MAP
+from agents.utils import strip_latex_to_text
 
 logger = structlog.get_logger(__name__)
 
@@ -123,7 +123,7 @@ class RankerAgent(BaseAgent):
 
             text = resume_path.read_text(encoding="utf-8")
             # Strip LaTeX commands for embedding (keep semantic content)
-            clean_text = self._strip_latex(text)
+            clean_text = strip_latex_to_text(text)
             self._resume_texts[category] = clean_text
 
             embedding = list(next(iter(self.embedder.embed([clean_text]))))
@@ -141,22 +141,6 @@ class RankerAgent(BaseAgent):
 
         self._resumes_embedded = True
         self.log.info("all_resumes_embedded", count=len(self._resume_texts))
-
-    def _strip_latex(self, tex: str) -> str:
-        """Remove LaTeX commands and extract readable text."""
-        # Remove comments
-        tex = re.sub(r"%.*$", "", tex, flags=re.MULTILINE)
-        # Remove \command{...} -> keep content
-        tex = re.sub(r"\\[a-zA-Z]+\*?\{([^}]*)\}", r"\1", tex)
-        # Remove \command[...]{...} -> keep content
-        tex = re.sub(r"\\[a-zA-Z]+\*?\[.*?\]\{([^}]*)\}", r"\1", tex)
-        # Remove remaining \command
-        tex = re.sub(r"\\[a-zA-Z]+\*?", " ", tex)
-        # Remove special chars
-        tex = re.sub(r"[{}\\$&#^_~]", " ", tex)
-        # Normalize whitespace
-        tex = re.sub(r"\s+", " ", tex)
-        return tex.strip()
 
     async def rank_jobs(
         self,
@@ -328,7 +312,7 @@ class RankerAgent(BaseAgent):
         company = job.get("company", "")
         description = job.get("description", "") or ""
 
-        resume_text = self._strip_latex(tailored_latex)
+        resume_text = strip_latex_to_text(tailored_latex)
         combined_jd = f"{title}\n{company}\n{description}"
 
         # Embed both sides

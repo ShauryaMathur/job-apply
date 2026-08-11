@@ -43,6 +43,9 @@ class JobUpdate(BaseModel):
     resume_file: Optional[str] = None
     cover_letter_file: Optional[str] = None
     latex_content: Optional[str] = None
+    cover_letter_latex: Optional[str] = None
+    company_address: Optional[str] = None
+    hiring_manager: Optional[str] = None
 
 
 class JobOut(JobBase):
@@ -59,6 +62,9 @@ class JobOut(JobBase):
     s3_resume_url: Optional[str] = None
     s3_cover_letter_url: Optional[str] = None
     latex_content: Optional[str] = None
+    cover_letter_latex: Optional[str] = None
+    company_address: Optional[str] = None
+    hiring_manager: Optional[str] = None
     deleted_at: Optional[datetime] = None
     notes: Optional[str] = None
     created_at: Optional[datetime] = None

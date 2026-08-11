@@ -63,6 +63,9 @@ class Job(Base):
     s3_resume_url = Column(Text)
     s3_cover_letter_url = Column(Text)
     latex_content = Column(Text)
+    cover_letter_latex = Column(Text)
+    company_address = Column(Text)   # free-text e.g. "2400 Market St, Philadelphia, PA 19103"
+    hiring_manager = Column(Text)    # extracted from job description or null
     deleted_at = Column(DateTime(timezone=True), nullable=True)
 
     # Notes

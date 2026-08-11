@@ -7,3 +7,11 @@ RESUME_CATEGORY_MAP: dict[str, str] = {
 }
 
 CANDIDATE_NAME = "Shaurya Mathur"
+
+CANDIDATE_INFO = {
+    "name": "Shaurya Mathur",
+    "email": "shauryamathur2001@gmail.com",
+    "linkedin": "shauryamathur27",
+    "phone": "716-868-6775",
+    "location": "Buffalo, NY",
+}
