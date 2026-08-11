@@ -11,8 +11,10 @@ import {
   AlertCircle,
   ArrowLeft,
   Save,
+  BarChart2,
 } from "lucide-react";
-import { fetchJob, compileLatex, saveLatex, updateJob, type Job } from "@/lib/api";
+import Editor from "@monaco-editor/react";
+import { fetchJob, compileLatex, saveLatex, updateJob, rescoreJob, type Job } from "@/lib/api";
 import { CATEGORY_LABELS } from "@/lib/constants";
 
 function base64ToBlobUrl(b64: string): string {
@@ -36,6 +38,7 @@ export default function EditorPage({ params }: { params: { job_id: string } }) {
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
 
   const [autoSaving, setAutoSaving] = useState(false);
+  const [rescoring, setRescoring] = useState(false);
 
   // Inline editing for title / company in breadcrumb
   const [editingField, setEditingField] = useState<"title" | "company" | null>(null);
@@ -137,6 +140,21 @@ export default function EditorPage({ params }: { params: { job_id: string } }) {
     }
   }, [editingField, editValue, job, job_id]);
 
+  const handleRescore = useCallback(async () => {
+    if (!job || !latex) return;
+    setRescoring(true);
+    try {
+      // Flush latest edits to DB first so rescore uses current content
+      await saveLatex(job_id, latex);
+      const updated = await rescoreJob(job_id);
+      setJob(updated);
+    } catch (e) {
+      console.error("Rescore failed", e);
+    } finally {
+      setRescoring(false);
+    }
+  }, [job, latex, job_id]);
+
   const handleDownload = useCallback(() => {
     if (!pdfBlobUrl || !job) return;
     const a = document.createElement("a");
@@ -237,9 +255,17 @@ export default function EditorPage({ params }: { params: { job_id: string } }) {
         )}
         {job.h1b_likely === true && <Badge variant="success" className="text-xs">H1B Likely</Badge>}
         {job.h1b_likely === false && <Badge variant="destructive" className="text-xs">No H1B</Badge>}
-        {job.match_score != null && (
-          <span className="text-xs text-muted-foreground font-mono">Score: {job.match_score.toFixed(0)}</span>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleRescore}
+          disabled={rescoring || !latex}
+          className="gap-1.5 h-7 text-xs"
+        >
+          {rescoring
+            ? <><Loader2 className="h-3 w-3 animate-spin" />Rescoring…</>
+            : <><BarChart2 className="h-3 w-3" />{job.match_score != null ? `Score: ${job.match_score.toFixed(0)}` : "Rescore"}</>}
+        </Button>
         {job.link && (
           <a href={job.link} target="_blank" rel="noopener noreferrer" className="text-xs text-muted-foreground hover:text-foreground underline truncate max-w-[120px]">
             Job Posting ↗
@@ -297,13 +323,26 @@ export default function EditorPage({ params }: { params: { job_id: string } }) {
             <span className="text-xs font-medium text-muted-foreground">LaTeX Source</span>
             <span className="text-xs text-muted-foreground">{latex.split("\n").length} lines</span>
           </div>
-          <textarea
+          <Editor
+            language="latex"
             value={latex}
-            onChange={(e) => handleLatexChange(e.target.value)}
-            className="flex-1 p-3 font-mono text-xs bg-background resize-none focus:outline-none leading-relaxed"
-            spellCheck={false}
-            autoComplete="off"
-            autoCorrect="off"
+            theme="vs-dark"
+            onChange={(val) => handleLatexChange(val ?? "")}
+            loading={<div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">Loading editor…</div>}
+            options={{
+              fontSize: 12,
+              fontFamily: "ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, monospace",
+              minimap: { enabled: false },
+              wordWrap: "on",
+              lineNumbers: "on",
+              scrollBeyondLastLine: false,
+              automaticLayout: true,
+              tabSize: 2,
+              renderWhitespace: "none",
+              overviewRulerLanes: 0,
+              hideCursorInOverviewRuler: true,
+              scrollbar: { vertical: "auto", horizontal: "hidden" },
+            }}
           />
         </div>
 

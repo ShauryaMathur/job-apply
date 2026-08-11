@@ -150,6 +150,7 @@ _EXTRACT_PROMPT = """Extract structured job details from the page text below. Re
 {{
   "title": "exact job title string",
   "company": "company name string",
+  "location": "city, state or country string, or 'Remote', or null if not found",
   "seniority": "one of: entry, mid, senior, staff, principal, director",
   "h1b_likely": true or false or null,
   "key_skills": ["up to 10 most important technical skills/tools"],
@@ -163,6 +164,7 @@ Rules:
     3. The domain name or logo text if visible
     4. Any "Posted by" or "Hiring at" references
   NEVER return "Not Specified", "N/A", "Unknown", or any placeholder — if truly undetectable use "Unknown Company"
+- location: city and state (e.g. "Austin, TX"), country, "Remote", or null if not mentioned
 - h1b_likely: true if sponsorship mentioned/offered, false if explicitly not offered, null if not mentioned
 - key_skills: most important technical skills from the JD only
 - description: keep ALL technical details, strip navigation/cookie/footer text
@@ -215,17 +217,58 @@ async def _call_pdfworker(tex_content: str) -> bytes:
         raise HTTPException(status_code=422, detail=f"LaTeX compilation failed: {detail}")
 
 
+# ── Source detection ──────────────────────────────────────────────────────────
+
+_SOURCE_MAP = {
+    "linkedin": "linkedin",
+    "lever": "lever",
+    "greenhouse": "greenhouse",
+    "myworkday": "workday",
+    "workday": "workday",
+    "ashbyhq": "ashby",
+    "ashby": "ashby",
+    "smartrecruiters": "smartrecruiters",
+    "jobright": "jobright",
+    "indeed": "indeed",
+    "glassdoor": "glassdoor",
+    "dice": "dice",
+    "icims": "icims",
+    "taleo": "taleo",
+    "bamboohr": "bamboohr",
+    "wellfound": "wellfound",
+    "workable": "workable",
+    "recruitee": "recruitee",
+}
+
+
+def _source_from_url(url: str) -> str:
+    """Detect job board / ATS source from URL hostname."""
+    try:
+        from urllib.parse import urlparse
+        hostname = (urlparse(url).hostname or "").lower().replace("www.", "")
+        for keyword, source in _SOURCE_MAP.items():
+            if keyword in hostname:
+                return source
+        # fallback: use first domain label (e.g. jobs.acme.com → "acme")
+        parts = hostname.split(".")
+        return parts[-2] if len(parts) >= 2 else (parts[0] or "manual")
+    except Exception:
+        return "manual"
+
+
 # ── Request / Response models ─────────────────────────────────────────────────
 
 class IngestUrlRequest(BaseModel):
     url: Optional[str] = None
     role_category: str = "backend"
     description: Optional[str] = None  # manual override — skips scraping when provided
+    source: Optional[str] = None       # explicit source override; auto-detected from URL if omitted
 
 
 class JobInfoOut(BaseModel):
     title: str
     company: str
+    location: Optional[str] = None
     description: str
     h1b_likely: Optional[bool] = None
     seniority: Optional[str] = None
@@ -278,9 +321,11 @@ async def ingest_url(request: IngestUrlRequest, db: AsyncSession = Depends(get_d
         return value.strip()
 
     info = await _extract_job_info(page_text)
+    raw_location = info.get("location")
     job_info = JobInfoOut(
         title=_clean(info.get("title"), "Unknown Role"),
         company=_clean(info.get("company"), "Unknown Company"),
+        location=raw_location.strip() if raw_location and raw_location.strip().lower() not in _PLACEHOLDER_VALUES else None,
         description=info.get("description") or page_text[:4000],
         h1b_likely=info.get("h1b_likely"),
         seniority=info.get("seniority"),
@@ -302,26 +347,53 @@ async def ingest_url(request: IngestUrlRequest, db: AsyncSession = Depends(get_d
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Resume tailoring failed: {e}")
 
-    # 4. Persist job to DB so it shows up in the left pane and can be auto-saved
+    # 4. Score tailored resume vs JD (non-fatal — more accurate than base-resume score)
+    match_score = None
+    h1b_likely = job_info.h1b_likely
+    h1b_notes = None
+    try:
+        from agents.ranker import RankerAgent
+        ranker = RankerAgent(config)
+        scored = await ranker.score_tailored_resume(
+            job={
+                "job_id": "scout-tmp",
+                "title": job_info.title,
+                "company": job_info.company,
+                "description": job_info.description,
+                "role_category": request.role_category,
+            },
+            tailored_latex=latex,
+        )
+        match_score = scored.get("match_score")
+        h1b_likely = scored.get("h1b_likely", h1b_likely)
+        h1b_notes = scored.get("h1b_notes")
+        logger.info("scout_job_scored", score=match_score, h1b=h1b_likely)
+    except Exception as e:
+        logger.warning("scout_scoring_failed", error=str(e))
+
+    # 5. Persist job to DB so it shows up in the left pane and can be auto-saved
     from backend.models import Job
     job_id = f"manual-{uuid.uuid4().hex[:12]}"
     db_job = Job(
         job_id=job_id,
         title=job_info.title,
         company=job_info.company,
+        location=job_info.location,
         link=request.url or "",
         description=job_info.description[:4000],
         role_category=request.role_category,
-        source="manual",
+        source=request.source or (_source_from_url(request.url) if request.url else "manual"),
         status="new",
-        h1b_likely=job_info.h1b_likely,
+        match_score=match_score,
+        h1b_likely=h1b_likely,
+        h1b_notes=h1b_notes,
         latex_content=latex,
     )
     db.add(db_job)
     await db.flush()
     logger.info("manual_job_persisted", job_id=job_id, title=job_info.title)
 
-    # 5. Compile PDF (non-fatal — return latex even if compile fails)
+    # 6. Compile PDF (non-fatal — return latex even if compile fails)
     pdf_base64 = None
     compile_error = None
     try:

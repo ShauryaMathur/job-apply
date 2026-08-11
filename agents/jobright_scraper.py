@@ -256,12 +256,18 @@ class JobrightScraper(BaseAgent):
                     break
 
             # Location
+            # Jobright cards prefix city names with a work-type label ("Company" = on-site,
+            # "Hybrid", "Stage", etc.) — strip those before accepting the match.
+            _WORK_TYPE_PREFIX = re.compile(
+                r"^(Company|Stage|Hybrid|Contract|Part[\-\s]time|Full[\-\s]time)\s+", re.I
+            )
             location = ""
             m = re.search(
                 r"\b([A-Z][a-z]+(?: [A-Z][a-z]+)?,\s*[A-Z]{2}|Remote|United States)\b",
                 card_text,
             )
-            if m: location = m.group(1)
+            if m:
+                location = _WORK_TYPE_PREFIX.sub("", m.group(1)).strip()
 
             # Posted time
             posted_at = None

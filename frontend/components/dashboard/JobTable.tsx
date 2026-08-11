@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import type { Job } from "@/lib/api";
 import { updateJob, generateResume, generateCoverLetter, deleteJob, resumeDownloadUrl, coverLetterDownloadUrl, emailDownloadUrl } from "@/lib/api";
-import { STATUS_OPTIONS, CATEGORY_LABELS, STATUS_VARIANT, CATEGORY_VARIANT } from "@/lib/constants";
+import { STATUS_OPTIONS, CATEGORY_LABELS, STATUS_VARIANT, CATEGORY_VARIANT, SOURCE_LABELS } from "@/lib/constants";
 
 interface JobTableProps {
   jobs: Job[];
@@ -67,7 +67,7 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
 
   // AbortController per job for cancellable LLM operations
   const abortControllers = useRef<Record<string, AbortController>>({});
-  const [editingCell, setEditingCell] = useState<{ jobId: string; field: "title" | "company" } | null>(null);
+  const [editingCell, setEditingCell] = useState<{ jobId: string; field: "title" | "company" | "source" } | null>(null);
   const [editValue, setEditValue] = useState("");
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -131,7 +131,7 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
     abortControllers.current[jobId]?.abort();
   }, []);
 
-  const startCellEdit = (jobId: string, field: "title" | "company", current: string) => {
+  const startCellEdit = (jobId: string, field: "title" | "company" | "source", current: string) => {
     setEditingCell({ jobId, field });
     setEditValue(current);
   };
@@ -296,6 +296,9 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
                   Company <SortIcon field="company" />
                 </th>
                 <th className="text-left px-4 py-2 font-medium text-muted-foreground whitespace-nowrap">
+                  Source
+                </th>
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground whitespace-nowrap">
                   Role
                 </th>
                 <th
@@ -321,7 +324,7 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">
                     <div className="flex items-center justify-center gap-2">
                       <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                       Loading jobs...
@@ -331,7 +334,7 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
               )}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
                     <div className="flex flex-col items-center gap-2">
                       <Filter className="h-8 w-8 opacity-30" />
                       <p>No jobs found matching your filters.</p>
@@ -392,6 +395,28 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
                         onDoubleClick={() => startCellEdit(job.job_id, "company", job.company)}
                       >
                         {job.company}
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Source */}
+                  <td className="px-4 py-3 max-w-[120px]">
+                    {editingCell?.jobId === job.job_id && editingCell.field === "source" ? (
+                      <input
+                        autoFocus
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onBlur={commitCellEdit}
+                        onKeyDown={(e) => { if (e.key === "Enter") commitCellEdit(); if (e.key === "Escape") setEditingCell(null); }}
+                        className="text-xs bg-transparent border-b border-primary focus:outline-none w-full"
+                      />
+                    ) : (
+                      <span
+                        className="text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors truncate block"
+                        title="Double-click to edit source"
+                        onDoubleClick={() => startCellEdit(job.job_id, "source", job.source || "")}
+                      >
+                        {SOURCE_LABELS[job.source] || job.source || "—"}
                       </span>
                     )}
                   </td>

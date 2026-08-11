@@ -265,9 +265,67 @@ async def generate_resume(
         raise HTTPException(status_code=500, detail=f"Resume generation failed: {e}")
 
     job.latex_content = latex
+
+    # Score tailored resume vs JD (non-fatal — always rescore with the new tailored output)
+    try:
+        from agents.ranker import RankerAgent
+        ranker = RankerAgent(config)
+        scored = await ranker.score_tailored_resume(
+            job={
+                "job_id": job.job_id,
+                "title": job.title,
+                "company": job.company,
+                "description": job.description or "",
+                "role_category": job.role_category,
+            },
+            tailored_latex=latex,
+        )
+        job.match_score = scored.get("match_score")
+        if job.h1b_likely is None:
+            job.h1b_likely = scored.get("h1b_likely")
+            job.h1b_notes = scored.get("h1b_notes")
+    except Exception as e:
+        logger.warning("generate_resume_scoring_failed", job_id=job.job_id, error=str(e))
+
     await db.flush()
     await db.refresh(job)
 
+    return JobOut.model_validate(job)
+
+
+@router.post("/{job_id}/rescore", response_model=JobOut)
+async def rescore_job(
+    job: Job = Depends(get_job_or_404),
+    db: AsyncSession = Depends(get_db),
+):
+    """Rescore a job's match score against its current latex_content."""
+    if not job.latex_content:
+        raise HTTPException(status_code=400, detail="No LaTeX content to score against")
+
+    from backend.config import get_full_config
+    from agents.ranker import RankerAgent
+
+    config = get_full_config()
+    try:
+        ranker = RankerAgent(config)
+        scored = await ranker.score_tailored_resume(
+            job={
+                "job_id": job.job_id,
+                "title": job.title,
+                "company": job.company,
+                "description": job.description or "",
+                "role_category": job.role_category,
+            },
+            tailored_latex=job.latex_content,
+        )
+        job.match_score = scored.get("match_score")
+    except Exception as e:
+        logger.error("rescore_failed", job_id=job.job_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Rescore failed: {e}")
+
+    await db.flush()
+    await db.refresh(job)
+    logger.info("job_rescored", job_id=job.job_id, score=job.match_score)
     return JobOut.model_validate(job)
 
 

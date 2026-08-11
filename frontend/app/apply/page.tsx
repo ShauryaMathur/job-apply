@@ -21,12 +21,14 @@ import {
   PenLine,
 } from "lucide-react";
 import { ingestJobUrl, type JobInfo } from "@/lib/api";
+import { extractSourceFromUrl, SOURCE_LABELS } from "@/lib/constants";
 
 export default function ApplyPage() {
   const [url, setUrl] = useState("");
   const [category, setCategory] = useState("backend");
   const [manualDescription, setManualDescription] = useState("");
   const [showManualPaste, setShowManualPaste] = useState(false);
+  const [source, setSource] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -63,7 +65,7 @@ export default function ApplyPage() {
 
     try {
       const desc = manualDescription.trim() || undefined;
-      const result = await ingestJobUrl(trimmed || undefined, category, desc, controller.signal);
+      const result = await ingestJobUrl(trimmed || undefined, category, desc, controller.signal, source || undefined);
       setSuccessJobId(result.job_id);
       setSuccessJobInfo(result.job_info);
     } catch (e) {
@@ -77,10 +79,20 @@ export default function ApplyPage() {
       abortController.current = null;
       setLoading(false);
     }
-  }, [url, category, manualDescription, canSubmit]);
+  }, [url, category, manualDescription, canSubmit, source]);
+
+  const handleUrlChange = (val: string) => {
+    setUrl(val);
+    // Auto-detect source from URL, only if user hasn't manually overridden it
+    if (isValidUrl(val)) {
+      const detected = extractSourceFromUrl(val);
+      if (detected) setSource(detected);
+    }
+  };
 
   const handleReset = () => {
     setUrl("");
+    setSource("");
     setManualDescription("");
     setShowManualPaste(false);
     setLoadError(null);
@@ -109,7 +121,7 @@ export default function ApplyPage() {
                   type="url"
                   placeholder="https://jobs.lever.co/... or any job posting URL"
                   value={url}
-                  onChange={(e) => setUrl(e.target.value)}
+                  onChange={(e) => handleUrlChange(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && canSubmit && handleIngest()}
                   disabled={loading}
                   className={`w-full pl-9 pr-3 py-2 text-sm rounded-md border bg-background focus:outline-none focus:ring-1 disabled:opacity-60 ${
@@ -149,6 +161,22 @@ export default function ApplyPage() {
                 Enter a valid URL starting with https://
               </p>
             )}
+
+            {/* Source — auto-detected from URL, manually editable */}
+            <div className="mt-2 flex items-center gap-2">
+              <label className="text-xs text-muted-foreground shrink-0">Source</label>
+              <input
+                type="text"
+                placeholder={urlValid ? (extractSourceFromUrl(url) || "auto-detect…") : "e.g. LinkedIn, Lever (optional)"}
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+                disabled={loading}
+                className="flex-1 px-2 py-1 text-xs rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              />
+              {source && SOURCE_LABELS[source] && source !== SOURCE_LABELS[source].toLowerCase() && (
+                <span className="text-xs text-muted-foreground">{SOURCE_LABELS[source]}</span>
+              )}
+            </div>
 
             {/* Always-visible toggle for manual description */}
             {!showManualPaste && (

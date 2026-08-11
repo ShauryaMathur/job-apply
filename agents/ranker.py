@@ -309,6 +309,59 @@ class RankerAgent(BaseAgent):
 
         return 0.5  # Default neutral score
 
+    def _cosine_similarity(self, a: list[float], b: list[float]) -> float:
+        """Pure-Python cosine similarity between two embedding vectors."""
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = sum(x * x for x in a) ** 0.5
+        norm_b = sum(x * x for x in b) ** 0.5
+        return dot / (norm_a * norm_b) if norm_a * norm_b > 0 else 0.5
+
+    async def score_tailored_resume(self, job: dict, tailored_latex: str) -> dict:
+        """
+        Score a job against the *tailored* resume rather than the base resume.
+
+        Uses direct embedding cosine similarity between the stripped tailored
+        LaTeX and the job description, combined with LLM scoring — same 30/70
+        blend as _score_job but measured against the actual output resume.
+        """
+        title = job.get("title", "")
+        company = job.get("company", "")
+        description = job.get("description", "") or ""
+
+        resume_text = self._strip_latex(tailored_latex)
+        combined_jd = f"{title}\n{company}\n{description}"
+
+        # Embed both sides
+        resume_emb = list(next(iter(self.embedder.embed([resume_text]))))
+        jd_emb = list(next(iter(self.embedder.embed([combined_jd[:2000]]))))
+        similarity = self._cosine_similarity(resume_emb, jd_emb)
+
+        # LLM score against tailored resume text
+        llm_result = await self._llm_score_and_infer(
+            resume_text=resume_text[:2000],
+            job_title=title,
+            job_company=company,
+            job_description=description[:3000],
+        )
+
+        llm_score = llm_result.get("score", 50)
+        blended = round(0.3 * (similarity * 100) + 0.7 * llm_score, 1)
+
+        self.log.info(
+            "tailored_resume_scored",
+            job_id=job.get("job_id"),
+            score=blended,
+            similarity=round(similarity, 3),
+        )
+
+        return {
+            **job,
+            "match_score": blended,
+            "h1b_likely": llm_result.get("h1b_likely", job.get("h1b_likely")),
+            "h1b_notes": llm_result.get("h1b_notes", job.get("h1b_notes", "")),
+            "similarity_score": round(similarity, 4),
+        }
+
     async def _llm_score_and_infer(
         self,
         resume_text: str,

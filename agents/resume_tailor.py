@@ -33,6 +33,7 @@ FORMAT (non-negotiable):
 - Do NOT change any LaTeX formatting commands, spacing, or layout macros
 - Do NOT remove ANY line from the preamble (everything before \begin{document}). Copy it verbatim.
 - Return ONLY the complete raw LaTeX — no markdown fences, no explanations, no comments added by you
+- Do NOT use em dashes (— or \textemdash) or en dashes (– or \textendash); use a comma, semicolon, or rewrite the phrase instead
 
 PAGE LIMIT:
 - The resume MUST fit within 1 page
@@ -49,7 +50,8 @@ CONTENT CHANGES ALLOWED:
 
 CONTROLLED FABRICATION (allowed in these specific cases only):
 1. NUMBERS: If an achievement has no metric (e.g. "improved query performance"), you MAY add a plausible approximate figure (e.g. "improved query performance by ~35%"). Use "~" prefix to signal approximation. Keep it realistic and conservative.
-2. ADJACENT TECHNOLOGIES: If the job description mentions a tool that is a direct equivalent or common companion to something already in the resume, you MAY add it alongside the existing one. Examples:
+2. AI CODING TOOLS BULLET: The RoundTechSquare experience contains a commented-out bullet with the placeholder [AI_TOOL]. If the job description explicitly mentions AI coding assistants or developer productivity tools (e.g. GitHub Copilot, Claude, Cursor, Codeium, Tabnine, Amazon CodeWhisperer, or similar), you MUST uncomment that bullet and replace [AI_TOOL] with the exact tool(s) named in the JD. Remove the two comment lines above it (the instruction comment). If the JD does not mention any such tool, leave the bullet commented out.
+3. ADJACENT TECHNOLOGIES: If the job description mentions a tool that is a direct equivalent or common companion to something already in the resume, you MAY add it alongside the existing one. Examples:
    - Resume has "ELK Stack" → JD mentions "Kibana" → add "Kibana" explicitly
    - Resume has "distributed tracing" → JD mentions "OpenTelemetry" → add "OpenTelemetry"
    - Resume has "Prometheus" → JD mentions "Grafana" → add "Grafana"
@@ -74,6 +76,7 @@ Instructions:
 5. Add plausible approximate metrics (~N%) where achievements lack numbers
 6. Add adjacent technologies where the JD explicitly calls for tools closely related to what's already in the resume
 7. Update the summary to directly mirror the role's language, seniority, and key requirements
+8. If the JD mentions AI coding assistants or developer productivity tools (GitHub Copilot, Claude, Cursor, Codeium, Tabnine, CodeWhisperer, etc.), uncomment the AI tools bullet in the RoundTechSquare section and replace [AI_TOOL] with the tool(s) named in the JD; also remove the two comment lines above it. If not mentioned, leave it commented.
 
 Return the complete tailored LaTeX code only. No explanations."""
 
@@ -94,6 +97,7 @@ Instructions:
 5. Add plausible approximate metrics (~N%) where achievements lack numbers
 6. Add adjacent technologies where the JD explicitly calls for tools closely related to what's already in the resume
 7. Update the summary to directly mirror the role's language, seniority, and key requirements
+8. If the JD mentions AI coding assistants or developer productivity tools (GitHub Copilot, Claude, Cursor, Codeium, Tabnine, CodeWhisperer, etc.), uncomment the AI tools bullet in the RoundTechSquare section and replace [AI_TOOL] with the tool(s) named in the JD; also remove the two comment lines above it. If not mentioned, leave it commented.
 
 Return the complete tailored LaTeX code only. No explanations."""
 

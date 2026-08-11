@@ -115,7 +115,7 @@ export async function fetchStats(): Promise<StatsResponse> {
 
 export async function updateJob(
   jobId: string,
-  data: { status?: string; notes?: string; title?: string; company?: string }
+  data: { status?: string; notes?: string; title?: string; company?: string; source?: string }
 ): Promise<Job> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}`, {
     method: "PATCH",
@@ -195,11 +195,17 @@ export async function ingestJobUrl(
   roleCategory: string,
   description?: string,
   signal?: AbortSignal,
+  source?: string,
 ): Promise<IngestUrlResponse> {
   const res = await fetch(`${API_BASE}/tools/ingest-url`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...(url ? { url } : {}), role_category: roleCategory, ...(description ? { description } : {}) }),
+    body: JSON.stringify({
+      ...(url ? { url } : {}),
+      role_category: roleCategory,
+      ...(description ? { description } : {}),
+      ...(source ? { source } : {}),
+    }),
     signal,
   });
   if (!res.ok) {
@@ -230,6 +236,15 @@ export async function cancelPipeline(runId: string): Promise<void> {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `Cancel failed: ${res.status}`);
   }
+}
+
+export async function rescoreJob(jobId: string): Promise<Job> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/rescore`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Rescore failed: ${res.status}`);
+  }
+  return res.json();
 }
 
 export async function generateResume(jobId: string, signal?: AbortSignal): Promise<Job> {
