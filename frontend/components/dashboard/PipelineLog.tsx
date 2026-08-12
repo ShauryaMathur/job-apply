@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { X, Download, Activity } from "lucide-react";
+import { API_BASE } from "@/lib/api";
 
 interface LogEntry {
   timestamp: string;
@@ -49,11 +50,7 @@ export function PipelineLog({ runId, onClose, onComplete }: PipelineLogProps) {
     setIsRunning(true);
     setError(null);
 
-    const apiBase = process.env.NEXT_PUBLIC_API_URL
-      ? `${process.env.NEXT_PUBLIC_API_URL}/api`
-      : "/api";
-
-    const es = new EventSource(`${apiBase}/pipeline/${runId}/logs`);
+    const es = new EventSource(`${API_BASE}/pipeline/${runId}/logs`);
     esRef.current = es;
 
     es.onmessage = (event) => {

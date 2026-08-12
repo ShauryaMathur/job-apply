@@ -21,6 +21,12 @@ import {
   ArrowLeft,
 } from "lucide-react";
 
+function RunStatusIcon({ status }: { status: string }) {
+  if (status === "running") return <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
+  if (status === "completed") return <CheckCircle className="h-3.5 w-3.5 text-green-500" />;
+  return <XCircle className="h-3.5 w-3.5 text-red-500" />;
+}
+
 export default function PipelinePage() {
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [runsLoading, setRunsLoading] = useState(true);
@@ -72,12 +78,6 @@ export default function PipelinePage() {
     setPipelineRunning(false);
     setTimeout(() => loadRuns(), 1500);
   }, [loadRuns]);
-
-  const RunStatusIcon = ({ status }: { status: string }) => {
-    if (status === "running") return <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
-    if (status === "completed") return <CheckCircle className="h-3.5 w-3.5 text-green-500" />;
-    return <XCircle className="h-3.5 w-3.5 text-red-500" />;
-  };
 
   return (
     <div className="space-y-6">

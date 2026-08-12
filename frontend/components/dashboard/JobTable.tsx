@@ -34,6 +34,15 @@ interface JobTableProps {
   onJobDeleted?: (jobId: string) => void;
 }
 
+function SortIcon({ field, sortField, sortDir }: { field: keyof Job; sortField: keyof Job; sortDir: "asc" | "desc" }) {
+  if (sortField !== field) return null;
+  return sortDir === "asc" ? (
+    <ChevronUp className="inline h-3 w-3 ml-0.5" />
+  ) : (
+    <ChevronDown className="inline h-3 w-3 ml-0.5" />
+  );
+}
+
 function ScoreBar({ score }: { score: number | null }) {
   if (score === null || score === undefined) {
     return <span className="text-muted-foreground text-xs">—</span>;
@@ -201,15 +210,6 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
       return 0;
     });
 
-  const SortIcon = ({ field }: { field: keyof Job }) =>
-    sortField === field ? (
-      sortDir === "asc" ? (
-        <ChevronUp className="inline h-3 w-3 ml-0.5" />
-      ) : (
-        <ChevronDown className="inline h-3 w-3 ml-0.5" />
-      )
-    ) : null;
-
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -287,13 +287,13 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
                   className="text-left px-4 py-2 font-medium text-muted-foreground cursor-pointer hover:text-foreground whitespace-nowrap"
                   onClick={() => toggleSort("title")}
                 >
-                  Title <SortIcon field="title" />
+                  Title <SortIcon field="title" sortField={sortField} sortDir={sortDir} />
                 </th>
                 <th
                   className="text-left px-4 py-2 font-medium text-muted-foreground cursor-pointer hover:text-foreground whitespace-nowrap"
                   onClick={() => toggleSort("company")}
                 >
-                  Company <SortIcon field="company" />
+                  Company <SortIcon field="company" sortField={sortField} sortDir={sortDir} />
                 </th>
                 <th className="text-left px-4 py-2 font-medium text-muted-foreground whitespace-nowrap">
                   Source
@@ -305,7 +305,7 @@ export function JobTable({ jobs, loading, onJobUpdated, onJobDeleted }: JobTable
                   className="text-left px-4 py-2 font-medium text-muted-foreground cursor-pointer hover:text-foreground whitespace-nowrap"
                   onClick={() => toggleSort("match_score")}
                 >
-                  Score <SortIcon field="match_score" />
+                  Score <SortIcon field="match_score" sortField={sortField} sortDir={sortDir} />
                 </th>
                 <th className="text-left px-4 py-2 font-medium text-muted-foreground whitespace-nowrap">
                   H1B

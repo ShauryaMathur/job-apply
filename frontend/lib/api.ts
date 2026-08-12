@@ -3,7 +3,7 @@
  * All requests go through Next.js rewrites → /api/* → backend.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL
   ? `${process.env.NEXT_PUBLIC_API_URL}/api`
   : "/api";
 
@@ -117,13 +117,13 @@ export async function fetchJobs(params?: {
 
   const url = `${API_BASE}/jobs${query.toString() ? `?${query}` : ""}`;
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Failed to fetch jobs: ${res.statusText}`);
+  await throwIfNotOk(res, "Failed to fetch jobs");
   return res.json();
 }
 
 export async function fetchStats(): Promise<StatsResponse> {
   const res = await fetch(`${API_BASE}/jobs/stats`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Failed to fetch stats: ${res.statusText}`);
+  await throwIfNotOk(res, "Failed to fetch stats");
   return res.json();
 }
 
@@ -136,7 +136,7 @@ export async function updateJob(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error(`Failed to update job: ${res.statusText}`);
+  await throwIfNotOk(res, "Failed to update job");
   return res.json();
 }
 
@@ -152,13 +152,13 @@ export async function triggerPipeline(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload ?? {}),
   });
-  if (!res.ok) throw new Error(`Failed to trigger pipeline: ${res.statusText}`);
+  await throwIfNotOk(res, "Failed to trigger pipeline");
   return res.json();
 }
 
 export async function fetchPipelineRuns(): Promise<{ runs: PipelineRun[] }> {
   const res = await fetch(`${API_BASE}/pipeline/runs`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Failed to fetch runs: ${res.statusText}`);
+  await throwIfNotOk(res, "Failed to fetch runs");
   return res.json();
 }
 
@@ -294,13 +294,13 @@ export async function saveLatex(jobId: string, latexContent: string): Promise<Jo
 
 export async function fetchJob(jobId: string): Promise<Job> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Failed to fetch job: ${res.statusText}`);
+  await throwIfNotOk(res, "Failed to fetch job");
   return res.json();
 }
 
 export async function fetchJobsWithLatex(): Promise<Job[]> {
   const res = await fetch(`${API_BASE}/jobs?has_latex=true&limit=200`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Failed to fetch jobs: ${res.statusText}`);
+  await throwIfNotOk(res, "Failed to fetch jobs");
   const data: JobListResponse = await res.json();
   return data.jobs;
 }

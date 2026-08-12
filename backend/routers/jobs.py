@@ -96,9 +96,16 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
         await db.execute(select(func.count(Job.id)).where(Job.deleted_at.is_(None)).where(Job.h1b_likely == True))
     ).scalar_one()
 
-    # Resumes generated
+    # Resumes generated -- count latex_content, not resume_file. resume_file
+    # only gets set by the batch pipeline's local-disk PDF write; the
+    # interactive flows (dashboard "Generate Resume", Scout ingest) only
+    # ever persist latex_content, since their PDF compile is ephemeral
+    # (served straight to the browser, never written back to the job row).
+    # latex_content is a strict superset -- the batch flow always sets it
+    # before attempting resume_file -- and it's what JobTable.tsx already
+    # treats as "this job has a resume" for its own UI.
     resumes = (
-        await db.execute(select(func.count(Job.id)).where(Job.deleted_at.is_(None)).where(Job.resume_file.isnot(None)))
+        await db.execute(select(func.count(Job.id)).where(Job.deleted_at.is_(None)).where(Job.latex_content.isnot(None)))
     ).scalar_one()
 
     applied = by_status.get("applied", 0)
