@@ -15,6 +15,7 @@ import structlog
 
 from agents.base import BaseAgent
 from agents.constants import CANDIDATE_INFO, CANDIDATE_NAME, RESUME_CATEGORY_MAP
+from agents.pdf_compile import compile_pdf_to_file
 from agents.utils import escape_latex, strip_latex_to_text
 
 logger = structlog.get_logger(__name__)
@@ -384,42 +385,17 @@ class CoverLetterAgent(BaseAgent):
         job_dir: Path,
     ) -> Optional[Path]:
         """Send LaTeX to pdfworker for compilation. Returns local PDF path or None."""
-        pdf_path = job_dir / f"{output_name}.pdf"
-        try:
-            client = await self._get_http_client()
-            response = await client.post(
-                f"{self.pdf_worker_url}/compile",
-                json={
-                    "tex_content": tex_content,
-                    "filename": output_name,
-                },
-                timeout=90.0,
-            )
-            if response.status_code == 200:
-                pdf_path.write_bytes(response.content)
-                self.log.info(
-                    "cover_letter_pdf_compiled",
-                    path=str(pdf_path),
-                    size=len(response.content),
-                )
-                return pdf_path
-            else:
-                self.log.error(
-                    "pdf_worker_error",
-                    status=response.status_code,
-                    body=response.text[:500],
-                )
-                return None
-        except httpx.ConnectError:
-            self.log.warning(
-                "pdf_worker_unavailable",
-                url=self.pdf_worker_url,
-                msg="pdfworker service not reachable; skipping cover letter PDF compilation",
-            )
-            return None
-        except Exception as e:
-            self.log.error("cover_letter_pdf_compile_error", error=str(e))
-            return None
+        client = await self._get_http_client()
+        return await compile_pdf_to_file(
+            client=client,
+            pdf_worker_url=self.pdf_worker_url,
+            tex_content=tex_content,
+            output_name=output_name,
+            job_dir=job_dir,
+            log=self.log,
+            label="cover letter PDF",
+            log_prefix="cover_letter_pdf",
+        )
 
     async def generate_cover_letter(
         self,

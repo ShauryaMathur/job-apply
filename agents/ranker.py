@@ -52,6 +52,30 @@ Return ONLY valid JSON:
 }"""
 
 
+def job_score_input(
+    job_id: str,
+    title: str,
+    company: str,
+    description: str,
+    role_category: str,
+) -> dict:
+    """
+    Build the minimal job dict RankerAgent.score_tailored_resume() expects.
+
+    Callers (backend/routers/jobs.py, backend/routers/tools.py) only ever
+    need these 5 fields for scoring -- this exists so each call site doesn't
+    reimplement the same dict literal (and risk drifting from what
+    score_tailored_resume actually reads).
+    """
+    return {
+        "job_id": job_id,
+        "title": title,
+        "company": company,
+        "description": description or "",
+        "role_category": role_category,
+    }
+
+
 class RankerAgent(BaseAgent):
     """
     Ranks job listings by relevance to the candidate's resumes.

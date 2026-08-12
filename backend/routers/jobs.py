@@ -268,16 +268,10 @@ async def generate_resume(
 
     # Score tailored resume vs JD (non-fatal — always rescore with the new tailored output)
     try:
-        from agents.ranker import RankerAgent
+        from agents.ranker import RankerAgent, job_score_input
         ranker = RankerAgent(config)
         scored = await ranker.score_tailored_resume(
-            job={
-                "job_id": job.job_id,
-                "title": job.title,
-                "company": job.company,
-                "description": job.description or "",
-                "role_category": job.role_category,
-            },
+            job=job_score_input(job.job_id, job.title, job.company, job.description, job.role_category),
             tailored_latex=latex,
         )
         job.match_score = scored.get("match_score")
@@ -303,19 +297,13 @@ async def rescore_job(
         raise HTTPException(status_code=400, detail="No LaTeX content to score against")
 
     from backend.config import get_full_config
-    from agents.ranker import RankerAgent
+    from agents.ranker import RankerAgent, job_score_input
 
     config = get_full_config()
     try:
         ranker = RankerAgent(config)
         scored = await ranker.score_tailored_resume(
-            job={
-                "job_id": job.job_id,
-                "title": job.title,
-                "company": job.company,
-                "description": job.description or "",
-                "role_category": job.role_category,
-            },
+            job=job_score_input(job.job_id, job.title, job.company, job.description, job.role_category),
             tailored_latex=job.latex_content,
         )
         job.match_score = scored.get("match_score")

@@ -144,3 +144,41 @@ class StatsResponse(BaseModel):
     resumes_generated: int
     applied_count: int
     interview_count: int
+
+
+# ---------------------------------------------------------------------------
+# Tools schemas (manual job URL ingestion + live LaTeX compilation)
+# ---------------------------------------------------------------------------
+
+class IngestUrlRequest(BaseModel):
+    url: Optional[str] = None
+    role_category: str = "backend"
+    description: Optional[str] = None  # manual override — skips scraping when provided
+    source: Optional[str] = None       # explicit source override; auto-detected from URL if omitted
+
+
+class JobInfoOut(BaseModel):
+    title: str
+    company: str
+    location: Optional[str] = None
+    description: str
+    h1b_likely: Optional[bool] = None
+    seniority: Optional[str] = None
+    key_skills: List[str] = []
+
+
+class IngestUrlResponse(BaseModel):
+    job_id: str
+    job_info: JobInfoOut
+    latex: str
+    pdf_base64: Optional[str] = None
+    compile_error: Optional[str] = None
+
+
+class CompileLatexRequest(BaseModel):
+    tex_content: str
+
+
+class CompileLatexResponse(BaseModel):
+    pdf_base64: str
+    size: int
